@@ -1,0 +1,22 @@
+# ESPeep — your own EAN to product-name table.
+#
+# This table WINS over whatever Open Food Facts returns. That is the point of
+# it: OFF knows the product as "Ja! Haltbare Fettarme Milch 1,5%", but what you
+# want on the shopping list is "Milch".
+#
+# Two ways entries get in here:
+#   * you edit this file (keep it in git — that is why it lives in the repo)
+#   * you answer the push notification ESPeep sends for an unknown barcode,
+#     and the `espeep_remember_ean` shell command appends the entry below
+#
+# Rules:
+#   * ALWAYS quote the barcode. Unquoted, YAML reads it as a number and drops
+#     leading zeros, and the lookup will never match.
+#   * One `"barcode": "name"` pair per line.
+#
+# Examples — delete these, they are only here to show the shape:
+#
+#   "4008400202037": "Milch"
+#   "4104420045200": "Spülmaschinentabs"
+#
+# Entries added from your phone are appended below this line.

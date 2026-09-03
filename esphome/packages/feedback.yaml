@@ -1,0 +1,41 @@
+# ESPeep — audible feedback.
+#
+# Every UI state change from base.yaml runs through `ui_feedback`, so the
+# device can be used without looking at the display: a short high blip means
+# the item went on the list, everything else sounds different enough to make
+# you look.
+#
+# Needs a *passive* piezo buzzer — an active one only knows on and off and
+# will play every tune below as the same beep.
+
+output:
+  - platform: ledc
+    id: buzzer_out
+    pin: ${buzzer_pin}
+
+rtttl:
+  id: buzzer
+  output: buzzer_out
+  # Keeps the buzzer from sounding shrill at full duty cycle.
+  gain: 60%
+
+script:
+  - id: ui_feedback
+    # A rapid second scan should cut the previous tune short, not queue behind it.
+    mode: restart
+    then:
+      - lambda: |-
+          const std::string &state = id(ui_state);
+          if (state == "read") {
+            // Barcode accepted, lookup starting.
+            id(buzzer).play("read:d=32,o=6,b=200:c");
+          } else if (state == "ok") {
+            // Product resolved and sent to Home Assistant.
+            id(buzzer).play("ok:d=16,o=6,b=180:e,a");
+          } else if (state == "unknown") {
+            // Not in any database — Home Assistant will ask you for a name.
+            id(buzzer).play("unknown:d=8,o=5,b=160:c,p,c");
+          } else if (state == "error") {
+            // No WiFi, bad check digit, server problem.
+            id(buzzer).play("error:d=2,o=4,b=140:c");
+          }

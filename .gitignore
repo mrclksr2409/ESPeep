@@ -1,0 +1,16 @@
+# ESPHome build output and local credentials
+esphome/.esphome/
+esphome/secrets.yaml
+*.bin
+*.elf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
