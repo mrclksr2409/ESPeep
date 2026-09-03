@@ -1,0 +1,61 @@
+# ESPeep — EAN scanner for the Home Assistant shopping list.
+#
+# This file is the only one you should need to edit. Everything below the
+# substitutions is split into packages under packages/.
+#
+#   1. cp secrets.yaml.example secrets.yaml   and fill it in
+#   2. adjust the substitutions to your board and wiring
+#   3. esphome run espeep.yaml
+#
+# Wiring and part list: ../docs/hardware.md
+# Getting a scanner into UART mode: ../docs/scanner-modules.md
+
+substitutions:
+  device_name: espeep
+  friendly_name: ESPeep
+
+  # --- board ---------------------------------------------------------------
+  # "esp32dev" covers the common DevKitC / NodeMCU-32S boards. For a
+  # D1 Mini ESP32 use "wemos_d1_mini32".
+  esp32_board: esp32dev
+  log_level: INFO
+  # Onboard LED of most ESP32 dev boards. Set to "true" if yours is active low.
+  status_led_pin: GPIO2
+  status_led_inverted: "false"
+
+  # --- barcode scanner (UART) ----------------------------------------------
+  # rx_pin goes to the scanner's TX line and vice versa.
+  # UART2 on the ESP32; leaves UART0 free for the USB log.
+  scanner_rx_pin: GPIO16
+  scanner_tx_pin: GPIO17
+  # Factory default of the GM60: 57600 8N1.
+  # GM65 / GM66 / GM67 / GM77 use 9600 instead — see
+  # ../docs/scanner-modules.md for the full table.
+  scanner_baud: "57600"
+  # Ignore the same barcode if it is read again within this many milliseconds.
+  rescan_guard_ms: "3000"
+
+  # --- OLED (I2C) ----------------------------------------------------------
+  i2c_sda: GPIO21
+  i2c_scl: GPIO22
+  # 0x3C on almost every 0.96" module; the i2c scan at boot logs the truth.
+  oled_address: "0x3C"
+  # How long a result stays on screen before returning to the idle screen.
+  result_hold_ms: "6000"
+
+  # --- buzzer --------------------------------------------------------------
+  # Must be a passive piezo buzzer, not an active one.
+  buzzer_pin: GPIO25
+
+  # --- product lookup ------------------------------------------------------
+  lookup_timeout: 8s
+  # Open Food Facts asks clients to identify themselves. Put your own contact
+  # or repository URL here if you fork this.
+  off_user_agent: "ESPeep/1.0 (https://github.com/mrclksr2409/ESPeep)"
+
+packages:
+  base: !include packages/base.yaml
+  scanner: !include packages/scanner.yaml
+  lookup: !include packages/lookup.yaml
+  display: !include packages/display.yaml
+  feedback: !include packages/feedback.yaml

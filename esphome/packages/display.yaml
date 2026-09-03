@@ -1,0 +1,94 @@
+# ESPeep — 0.96" SSD1306 OLED.
+#
+# Renders the shared UI state from base.yaml. Without a display you never know
+# at the shelf whether the scan hit the right product, which is the whole point
+# of showing the resolved name here rather than only in Home Assistant.
+
+i2c:
+  id: i2c_bus
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
+  # Logs the addresses found on the bus at boot — the quickest way to find out
+  # whether an OLED lives at 0x3C or 0x3D.
+  scan: true
+
+font:
+  # Product names from Open Food Facts contain umlauts, so the default
+  # ASCII-only glyph set is not enough.
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 10
+    glyphs: &glyphs >-
+      !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+      äöüÄÖÜßéèêáàâíìîóòôúùûñç°
+  - file: "gfonts://Roboto"
+    id: font_large
+    size: 16
+    glyphs: *glyphs
+
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SSD1306 128x64"
+    address: ${oled_address}
+    update_interval: 250ms
+    lambda: |-
+      const std::string &state = id(ui_state);
+
+      // --- header ---------------------------------------------------------
+      std::string header;
+      if (state == "idle")
+        header = id(ha_api).is_connected() ? "Bereit" : "Warte auf HA";
+      else if (state == "read" || state == "busy")
+        header = "Suche...";
+      else if (state == "ok")
+        header = "Auf der Liste";
+      else if (state == "unknown")
+        header = "Unbekannt";
+      else
+        header = "Fehler";
+
+      it.printf(0, 0, id(font_small), "%s", header.c_str());
+      it.line(0, 12, it.get_width(), 12);
+
+      if (state == "idle") {
+        it.printf(0, 20, id(font_large), "ESPeep");
+        it.printf(0, 42, id(font_small), "%s",
+                  wifi::global_wifi_component->is_connected() ? "Barcode scannen"
+                                                             : "Kein WLAN");
+        return;
+      }
+
+      // --- title, wrapped over up to three lines ---------------------------
+      // The OLED fits roughly 20 characters of font_small per line.
+      const size_t line_len = 20;
+      std::string rest = id(ui_title);
+      int y = 16;
+      for (int line = 0; line < 3 && !rest.empty(); line++) {
+        std::string chunk = rest;
+        if (chunk.length() > line_len) {
+          // Break on the last space that still fits, so words stay intact.
+          size_t split = chunk.rfind(' ', line_len);
+          if (split == std::string::npos || split == 0) {
+            // No space to break on, so cut mid-word — but back off to a UTF-8
+            // character boundary first. Umlauts are two bytes, and cutting
+            // between them renders as a broken glyph.
+            split = line_len;
+            while (split > 0 && ((uint8_t) chunk[split] & 0xC0) == 0x80)
+              split--;
+          }
+          chunk = rest.substr(0, split);
+          rest = rest.substr(chunk.length());
+        } else {
+          rest.clear();
+        }
+        while (!rest.empty() && rest[0] == ' ')
+          rest.erase(0, 1);
+
+        it.printf(0, y, id(font_small), "%s", chunk.c_str());
+        y += 12;
+      }
+
+      // --- detail line, pinned to the bottom -------------------------------
+      if (!id(ui_detail).empty())
+        it.printf(0, 52, id(font_small), "%s", id(ui_detail).c_str());

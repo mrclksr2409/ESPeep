@@ -1,0 +1,158 @@
+# ESPeep — barcode scanner input.
+#
+# Deliberately generic: virtually every TTL barcode module (GM60, GM65, GM66,
+# GM67, GM77, GM805-L, DE2120, …) behaves the same once it is switched into
+# UART mode — it emits the barcode as plain ASCII followed by CR and/or LF.
+# So instead of per-module drivers we read lines and validate them, which
+# means a new module usually only needs a different baud rate.
+#
+# See docs/scanner-modules.md for how to switch a module into UART mode.
+
+uart:
+  id: scanner_uart
+  rx_pin: ${scanner_rx_pin}
+  tx_pin: ${scanner_tx_pin}
+  baud_rate: ${scanner_baud}
+  # Barcodes are short; the assembler below drains the buffer every 20 ms.
+  rx_buffer_size: 256
+
+globals:
+  # Line assembler. ESPHome has no YAML-native "read a line from UART",
+  # so we collect bytes until a terminator arrives.
+  - id: uart_buffer
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+  # The barcode currently being looked up. lookup.yaml reads this from inside
+  # its on_response lambda, where script parameters are not visible
+  # (esphome/esphome#10363).
+  - id: current_ean
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+  # Double-read suppression: handheld modules happily fire the same code
+  # several times while the product is still in front of the lens.
+  - id: last_ean
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+  - id: last_ean_at
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+switch:
+  # Turn this on to see the raw bytes coming out of an unknown module.
+  # It is the tool for bringing up a scanner ESPeep has never seen, without
+  # having to touch the firmware.
+  - platform: template
+    id: raw_debug
+    name: "Raw UART Debug"
+    icon: mdi:bug-outline
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    entity_category: diagnostic
+
+text_sensor:
+  # Last accepted barcode — handy for debugging and for HA automations that
+  # want the raw value without listening for the event.
+  - platform: template
+    id: last_barcode
+    name: "Last Barcode"
+    icon: mdi:barcode
+    update_interval: never
+
+script:
+  # Validate a raw line and, if it is a plausible barcode, hand it on.
+  - id: handle_line
+    parameters:
+      raw: string
+    then:
+      - lambda: |-
+          // Keep digits only. This strips CR/LF, stray whitespace and the
+          // prefix/suffix characters some modules are configured to add.
+          std::string code;
+          for (char c : raw) {
+            if (c >= '0' && c <= '9')
+              code += c;
+          }
+
+          if (code.empty())
+            return;
+
+          // EAN-8, UPC-E(6+), UPC-A, EAN-13 and ITF-14 are the lengths worth
+          // accepting. Anything else is a misread or a non-product code.
+          size_t len = code.length();
+          if (len != 8 && len != 12 && len != 13 && len != 14) {
+            ESP_LOGW("espeep", "Ignoring barcode with unexpected length %u: %s",
+                     (unsigned) len, code.c_str());
+            id(ui_set)->execute("error", "Ungueltiger Code", code);
+            return;
+          }
+
+          // GS1 check digit: sum the digits with alternating weights from the
+          // right, the check digit completes the sum to a multiple of ten.
+          // This catches the misreads that would otherwise end up as garbage
+          // entries on the shopping list.
+          int sum = 0;
+          for (size_t i = 0; i + 1 < len; i++) {
+            int digit = code[len - 2 - i] - '0';
+            sum += (i % 2 == 0) ? digit * 3 : digit;
+          }
+          int expected = (10 - (sum % 10)) % 10;
+          if (expected != code[len - 1] - '0') {
+            ESP_LOGW("espeep", "Barcode %s failed the check digit test", code.c_str());
+            id(ui_set)->execute("error", "Pruefziffer falsch", code);
+            return;
+          }
+
+          uint32_t now = millis();
+          if (code == id(last_ean) && now - id(last_ean_at) < ${rescan_guard_ms}) {
+            ESP_LOGD("espeep", "Ignoring repeated scan of %s", code.c_str());
+            return;
+          }
+          id(last_ean) = code;
+          id(last_ean_at) = now;
+          id(current_ean) = code;
+
+          ESP_LOGI("espeep", "Accepted barcode %s", code.c_str());
+          id(last_barcode).publish_state(code);
+          id(ui_set)->execute("read", code, "Suche Produkt...");
+          id(lookup_product)->execute();
+
+interval:
+  - interval: 20ms
+    then:
+      - lambda: |-
+          while (id(scanner_uart).available()) {
+            uint8_t byte;
+            if (!id(scanner_uart).read_byte(&byte))
+              break;
+
+            if (id(raw_debug).state)
+              ESP_LOGD("espeep", "UART byte: 0x%02X ('%c')", byte,
+                       (byte >= 32 && byte < 127) ? (char) byte : '.');
+
+            if (byte == '\r' || byte == '\n') {
+              if (!id(uart_buffer).empty()) {
+                std::string line = id(uart_buffer);
+                id(uart_buffer).clear();
+                id(handle_line)->execute(line);
+              }
+              continue;
+            }
+
+            id(uart_buffer) += (char) byte;
+
+            // A module that is still in USB-HID mode, or running at the wrong
+            // baud rate, produces endless garbage. Drop it instead of growing
+            // the buffer without bound.
+            if (id(uart_buffer).length() > 64) {
+              ESP_LOGW("espeep", "Discarding overlong UART line — wrong baud rate "
+                                 "or scanner not in UART mode?");
+              id(uart_buffer).clear();
+            }
+          }

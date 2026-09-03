@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  logic-tests:
+    name: Barcode and display logic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run the logic tests
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -o test_logic tests/test_logic.cpp
+          ./test_logic
+
+  esphome:
+    name: ESPHome config and firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      # The real secrets never leave your machine; CI only needs values that
+      # satisfy the schema so the config can be validated and compiled.
+      - name: Provide placeholder secrets
+        working-directory: esphome
+        run: |
+          cp secrets.yaml.example secrets.yaml
+          sed -i "s|REPLACE_ME_WITH_A_BASE64_32_BYTE_KEY|$(openssl rand -base64 32)|" secrets.yaml
+
+      - name: Validate configuration
+        working-directory: esphome
+        run: esphome config espeep.yaml
+
+      # Catches C++ errors in the lambdas that `esphome config` cannot see.
+      - name: Compile firmware
+        working-directory: esphome
+        run: esphome compile espeep.yaml
+
+  home-assistant-yaml:
+    name: Home Assistant package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Parse the package the way Home Assistant does
+        run: |
+          python - <<'PY'
+          import os, sys, yaml
+
+          class HaLoader(yaml.SafeLoader):
+              pass
+
+          def include(loader, node):
+              path = os.path.join(os.path.dirname(loader.name),
+                                  loader.construct_scalar(node))
+              with open(path, encoding="utf-8") as handle:
+                  return yaml.load(handle, HaLoader)
+
+          HaLoader.add_constructor("!include", include)
+          HaLoader.add_constructor(
+              "!secret", lambda l, n: "<secret>")
+
+          with open("homeassistant/packages/espeep.yaml", encoding="utf-8") as handle:
+              data = yaml.load(handle, HaLoader)
+
+          for key in ("template", "shell_command", "script", "automation"):
+              assert key in data, f"missing top-level key: {key}"
+          assert {"espeep_add_item", "espeep_ask_for_name",
+                  "espeep_show_result"} <= set(data["script"])
+          ids = {a["id"] for a in data["automation"]}
+          assert ids == {"espeep_handle_scan", "espeep_learn_name"}, ids
+          for auto in data["automation"]:
+              # `single` would silently drop the second of two quick scans.
+              assert auto["mode"] == "queued", auto["id"]
+          print("Home Assistant package parsed and checked")
+          PY
+
+      - name: Check the mapping table is a valid YAML mapping
+        run: |
+          python - <<'PY'
+          import yaml
+          with open("homeassistant/packages/ean_mapping.yaml", encoding="utf-8") as handle:
+              data = yaml.safe_load(handle)
+          # An all-comments file loads as None, which the automation guards
+          # against with `or {}`. Anything else must be a barcode -> name map.
+          assert data is None or isinstance(data, dict), type(data)
+          for barcode, name in (data or {}).items():
+              assert isinstance(barcode, str), (
+                  f"{barcode!r} must be quoted — unquoted YAML drops leading zeros")
+              assert isinstance(name, str), name
+          print("mapping table OK")
+          PY
+
+  shellcheck:
+    name: Shell script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck homeassistant/espeep_remember_ean.sh
