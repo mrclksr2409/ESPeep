@@ -4,6 +4,11 @@
 # at the shelf whether the scan hit the right product, which is the whole point
 # of showing the resolved name here rather than only in Home Assistant.
 
+substitutions:
+  i2c_sda: GPIO21
+  i2c_scl: GPIO22
+  oled_address: "0x3C"
+
 i2c:
   id: i2c_bus
   sda: ${i2c_sda}
@@ -39,7 +44,7 @@ display:
       std::string header;
       if (state == "idle")
         header = id(ha_api).is_connected() ? "Bereit" : "Warte auf HA";
-      else if (state == "read" || state == "busy")
+      else if (state == "read")
         header = "Suche...";
       else if (state == "ok")
         header = "Auf der Liste";

@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ESPeep-Scanner einrichten",
+        "description": "Flashe zuerst die ESPeep-Firmware mit ESPHome und füge das Gerät zu Home Assistant hinzu. Wähle es dann hier aus, zusammen mit der Liste, auf der gescannte Produkte landen sollen.",
+        "data": {
+          "device_id": "ESPeep-Gerät",
+          "todo_entity": "Einkaufsliste",
+          "notify_service": "Handy für Rückfragen zu unbekannten Produkten",
+          "online_lookup": "Unbekannte Barcodes online nachschlagen",
+          "include_brand": "Marke vor den Namen setzen",
+          "language": "Sprache der Produktnamen"
+        },
+        "data_description": {
+          "device_id": "Das ESPHome-Gerät mit der ESPeep-Firmware.",
+          "todo_entity": "Jede To-do-Liste funktioniert: Lokale To-do-Liste, Einkaufsliste, Bring!, Mealie, …",
+          "notify_service": "Ein Benachrichtigungsdienst der Companion-App. Den Namen eines unbekannten Produkts tippst du direkt in die Benachrichtigung. Leer lassen für eine Home-Assistant-Benachrichtigung.",
+          "online_lookup": "Fragt Open Food Facts, Open Products Facts und Open Beauty Facts. Treffer landen in der Produktdatenbank, deine eigenen Namen haben immer Vorrang.",
+          "include_brand": "„Ferrero Nutella“ statt „Nutella“. Gilt nur für Namen aus den Online-Datenbanken.",
+          "language": "Zweibuchstabiger Code wie „de“. Leer = Sprache von Home Assistant."
+        }
+      }
+    },
+    "error": {
+      "device_not_found": "Dieses Gerät existiert nicht mehr."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits als ESPeep-Scanner eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ESPeep-Einstellungen",
+        "description": "Barcodes und Namen verwaltest du im ESPeep-Panel in der Seitenleiste.",
+        "data": {
+          "todo_entity": "Einkaufsliste",
+          "notify_service": "Handy für Rückfragen zu unbekannten Produkten",
+          "online_lookup": "Unbekannte Barcodes online nachschlagen",
+          "include_brand": "Marke vor den Namen setzen",
+          "language": "Sprache der Produktnamen"
+        },
+        "data_description": {
+          "notify_service": "Leer lassen für eine Home-Assistant-Benachrichtigung.",
+          "language": "Zweibuchstabiger Code wie „de“. Leer = Sprache von Home Assistant."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_scan": {
+        "name": "Letzter Scan"
+      },
+      "unknown_barcodes": {
+        "name": "Unbekannte Barcodes"
+      },
+      "known_products": {
+        "name": "Bekannte Produkte"
+      }
+    },
+    "switch": {
+      "add_to_list": {
+        "name": "Auf Einkaufsliste setzen"
+      }
+    }
+  },
+  "exceptions": {
+    "no_scanner": {
+      "message": "Es ist kein passender ESPeep-Scanner eingerichtet."
+    },
+    "unknown_product": {
+      "message": "Barcode {ean} ist nicht in der Produktdatenbank."
+    }
+  },
+  "services": {
+    "set_product": {
+      "name": "Produkt speichern",
+      "description": "Speichert einen Namen für einen Barcode. Er hat Vorrang vor den Online-Datenbanken.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "EAN-8, EAN-13, UPC-A oder ITF-14 mit gültiger Prüfziffer."
+        },
+        "name": {
+          "name": "Name",
+          "description": "So erscheint das Produkt auf der Einkaufsliste."
+        },
+        "brand": {
+          "name": "Marke",
+          "description": "Optional, nur zur Information."
+        },
+        "quantity": {
+          "name": "Menge",
+          "description": "Optional, nur zur Information."
+        }
+      }
+    },
+    "remove_product": {
+      "name": "Produkt entfernen",
+      "description": "Vergisst einen Barcode.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "Der zu vergessende Barcode."
+        }
+      }
+    },
+    "get_products": {
+      "name": "Produkte abrufen",
+      "description": "Liefert die Produktdatenbank, die unbekannten Barcodes und die letzten Scans."
+    },
+    "scan": {
+      "name": "Scan auslösen",
+      "description": "Verarbeitet einen Barcode genau wie einen echten Scan – zum Testen ohne Hardware.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "Der zu verarbeitende Barcode."
+        },
+        "device_id": {
+          "name": "Scanner",
+          "description": "Welche Liste und welches Display verwendet werden. Standard: der erste Scanner."
+        }
+      }
+    }
+  }
+}

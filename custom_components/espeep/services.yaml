@@ -1,0 +1,42 @@
+set_product:
+  fields:
+    ean:
+      required: true
+      example: "4008400202037"
+      selector:
+        text:
+    name:
+      required: true
+      example: "Milch"
+      selector:
+        text:
+    brand:
+      example: "Weihenstephan"
+      selector:
+        text:
+    quantity:
+      example: "1 l"
+      selector:
+        text:
+
+remove_product:
+  fields:
+    ean:
+      required: true
+      example: "4008400202037"
+      selector:
+        text:
+
+get_products:
+
+scan:
+  fields:
+    ean:
+      required: true
+      example: "3017620422003"
+      selector:
+        text:
+    device_id:
+      selector:
+        device:
+          integration: esphome

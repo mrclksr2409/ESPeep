@@ -1,0 +1,21 @@
+{
+  "domain": "espeep",
+  "name": "ESPeep",
+  "after_dependencies": ["esphome", "mobile_app", "notify"],
+  "codeowners": ["@mrclksr2409"],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "persistent_notification",
+    "todo",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/mrclksr2409/ESPeep",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/mrclksr2409/ESPeep/issues",
+  "requirements": [],
+  "version": "2.0.0"
+}

@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up an ESPeep scanner",
+        "description": "Flash the ESPeep firmware with ESPHome and add the device to Home Assistant first. Then pick it here, together with the list scanned products should go on.",
+        "data": {
+          "device_id": "ESPeep device",
+          "todo_entity": "Shopping list",
+          "notify_service": "Phone to ask for unknown products",
+          "online_lookup": "Look up unknown barcodes online",
+          "include_brand": "Put the brand in front of the name",
+          "language": "Product name language"
+        },
+        "data_description": {
+          "device_id": "The ESPHome device running the ESPeep firmware.",
+          "todo_entity": "Any to-do list works: Local To-do, Shopping List, Bring!, Mealie, …",
+          "notify_service": "A companion app notify service. You can type the name of a product nobody knows directly into the notification. Leave empty to get a Home Assistant notification instead.",
+          "online_lookup": "Ask Open Food Facts, Open Products Facts and Open Beauty Facts. Results are cached in the product database, and your own names always win.",
+          "include_brand": "\"Ferrero Nutella\" instead of \"Nutella\". Only applies to names from the online databases.",
+          "language": "Two-letter code like \"de\". Empty uses the Home Assistant language."
+        }
+      }
+    },
+    "error": {
+      "device_not_found": "That device no longer exists."
+    },
+    "abort": {
+      "already_configured": "This device is already set up as an ESPeep scanner."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ESPeep settings",
+        "description": "Barcodes and names are managed in the ESPeep panel in the sidebar.",
+        "data": {
+          "todo_entity": "Shopping list",
+          "notify_service": "Phone to ask for unknown products",
+          "online_lookup": "Look up unknown barcodes online",
+          "include_brand": "Put the brand in front of the name",
+          "language": "Product name language"
+        },
+        "data_description": {
+          "notify_service": "Leave empty to get a Home Assistant notification instead.",
+          "language": "Two-letter code like \"de\". Empty uses the Home Assistant language."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "last_scan": {
+        "name": "Last scan"
+      },
+      "unknown_barcodes": {
+        "name": "Unknown barcodes"
+      },
+      "known_products": {
+        "name": "Known products"
+      }
+    },
+    "switch": {
+      "add_to_list": {
+        "name": "Add to shopping list"
+      }
+    }
+  },
+  "exceptions": {
+    "no_scanner": {
+      "message": "No matching ESPeep scanner is set up."
+    },
+    "unknown_product": {
+      "message": "Barcode {ean} is not in the product database."
+    }
+  },
+  "services": {
+    "set_product": {
+      "name": "Set product",
+      "description": "Stores a name for a barcode. It wins over anything the online databases say.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "EAN-8, EAN-13, UPC-A or ITF-14, with a valid check digit."
+        },
+        "name": {
+          "name": "Name",
+          "description": "What goes on the shopping list."
+        },
+        "brand": {
+          "name": "Brand",
+          "description": "Optional, for your reference."
+        },
+        "quantity": {
+          "name": "Quantity",
+          "description": "Optional, for your reference."
+        }
+      }
+    },
+    "remove_product": {
+      "name": "Remove product",
+      "description": "Forgets a barcode.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "The barcode to forget."
+        }
+      }
+    },
+    "get_products": {
+      "name": "Get products",
+      "description": "Returns the product database, the unknown barcodes and the recent scans."
+    },
+    "scan": {
+      "name": "Scan",
+      "description": "Handles a barcode exactly as if it had been scanned — for testing without hardware.",
+      "fields": {
+        "ean": {
+          "name": "Barcode",
+          "description": "The barcode to handle."
+        },
+        "device_id": {
+          "name": "Scanner",
+          "description": "Which scanner's list and display to use. Defaults to the first one."
+        }
+      }
+    }
+  }
+}

@@ -8,6 +8,9 @@
 # Needs a *passive* piezo buzzer — an active one only knows on and off and
 # will play every tune below as the same beep.
 
+substitutions:
+  buzzer_pin: GPIO25
+
 output:
   - platform: ledc
     id: buzzer_out
@@ -27,15 +30,15 @@ script:
       - lambda: |-
           const std::string &state = id(ui_state);
           if (state == "read") {
-            // Barcode accepted, lookup starting.
+            // Barcode accepted and sent to Home Assistant.
             id(buzzer).play("read:d=32,o=6,b=200:c");
           } else if (state == "ok") {
-            // Product resolved and sent to Home Assistant.
+            // Product resolved and on the list.
             id(buzzer).play("ok:d=16,o=6,b=180:e,a");
           } else if (state == "unknown") {
-            // Not in any database — Home Assistant will ask you for a name.
+            // Not in any database — Home Assistant asks you for a name.
             id(buzzer).play("unknown:d=8,o=5,b=160:c,p,c");
           } else if (state == "error") {
-            // No WiFi, bad check digit, server problem.
+            // Bad check digit, no answer from Home Assistant, list unreachable.
             id(buzzer).play("error:d=2,o=4,b=140:c");
           }

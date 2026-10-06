@@ -13,8 +13,9 @@
 
 ## Wiring
 
-Defaults from `esphome/espeep.yaml`. Change the substitutions there if you wire
-it differently.
+These are the firmware's defaults. Wired differently? Override the matching
+substitutions in your device file — they are all listed in
+`esphome/espeep.yaml`.
 
 | Signal | ESP32 pin | Goes to |
 |---|---|---|
@@ -60,8 +61,8 @@ leave 5–15 cm of working distance in front of the lens.
   ground shows up as an OLED that stays dark and a scanner that returns
   garbage.
 - The i²c bus is scanned at boot and the addresses found are printed in the
-  log. If your OLED is at `0x3D` instead of `0x3C`, set `oled_address` in
-  `esphome/espeep.yaml`.
+  log. If your OLED is at `0x3D` instead of `0x3C`, set the substitution
+  `oled_address: "0x3D"` in your device file.
 - Route the buzzer wires away from the UART lines. It is a small thing, but a
   loud passive buzzer next to an unshielded 9600 baud line does cause misreads
   — which the check digit test then rejects, so you see "Prüfziffer falsch"
