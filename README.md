@@ -8,22 +8,32 @@ you unpack or use up groceries. Point, beep, done — the empty milk carton goes
 in the bin and "Milch" is on the list before you have put the lid down.
 
 ```
-scan ──▶ ESP32 ──▶ Open Food Facts ──▶ OLED shows the product
-                        │
-                        └──▶ Home Assistant ──▶ your to-do list
-                                   │
-                                   └── your own name for it wins
+scan ──▶ ESP32 ──▶ Home Assistant ──▶ your to-do list
+           ▲          │  ESPeep integration:
+           │          │   your names ▸ Open Food Facts ▸ ask you
+           └──────────┘
+        OLED shows what landed on the list
 ```
+
+ESPeep has two halves:
+
+- **the device** — ESPHome firmware, flashed from the ESPHome dashboard. It
+  reads and validates barcodes, nothing more.
+- **the ESPeep integration** — installed through HACS. It keeps the product
+  database, looks barcodes up, fills the list and asks you about unknown
+  products. Everything is managed from the **ESPeep panel** in the sidebar.
 
 ## What makes it usable day to day
 
 - **You see what it got.** The OLED shows the resolved product name at the
   shelf. A scanner that silently adds the wrong thing is worse than no scanner.
 - **Your names, not the database's.** Open Food Facts calls it "Ja! Haltbare
-  Fettarme Milch 1,5% 1l". Your list says "Milch". A mapping table in this
-  repo overrides the database, per barcode.
+  Fettarme Milch 1,5% 1l". Your list says "Milch". Rename it once in the
+  ESPeep panel and that is what every future scan puts on the list.
 - **Unknown products get learned once.** Not in any database? Your phone asks
-  what to call it, and the answer is stored — the next scan is instant.
+  what to call it — or you name it in the panel — and the answer is stored.
+- **Managed in Home Assistant, not in YAML.** Add, edit, search, import and
+  export barcodes in the sidebar panel. No files to edit, no restarts.
 - **Misreads do not reach your list.** Every barcode is check-digit validated
   on the device.
 - **No duplicates.** Scanning the same product on two shopping trips does not
@@ -46,45 +56,44 @@ Roughly 30 € in total. Full list and wiring in [docs/hardware.md](docs/hardwar
 
 ## Getting started
 
-```bash
-git clone https://github.com/mrclksr2409/ESPeep.git
-cd ESPeep/esphome
-cp secrets.yaml.example secrets.yaml   # fill in WiFi, API key, OTA password
-```
+1. **Build it** — wiring in [docs/hardware.md](docs/hardware.md). Check the
+   baud rate of your scanner in [docs/scanner-modules.md](docs/scanner-modules.md):
+   GM60 is 57600, GM65/GM67 are 9600.
+2. **Install the integration** — in HACS, add
+   `https://github.com/mrclksr2409/ESPeep` as a custom repository of type
+   *Integration*, install **ESPeep**, restart Home Assistant.
+3. **Flash the device** — in the ESPHome dashboard, create a new ESP32 device
+   and add the ESPeep packages to it: [docs/esphome.md](docs/esphome.md).
+   Adopt it in Home Assistant when it is discovered.
+4. **Connect them** — *Settings → Devices & Services → Add integration →
+   ESPeep*: pick the device, your to-do list and, optionally, your phone.
+   [docs/home-assistant.md](docs/home-assistant.md)
 
-1. Wire it up per [docs/hardware.md](docs/hardware.md).
-2. Check the baud rate for your module in
-   [docs/scanner-modules.md](docs/scanner-modules.md) and set `scanner_baud`
-   in `esphome/espeep.yaml`. GM60 is 57600, GM65/GM67 are 9600.
-3. `esphome run espeep.yaml`
-4. Set up the Home Assistant side —
-   [docs/home-assistant.md](docs/home-assistant.md). You need to fill in your
-   to-do list entity and your phone's notify service; both are marked in the
-   package file.
-
-Not getting anything out of the scanner? Turn on the **Raw UART Debug** switch
-and read [docs/troubleshooting.md](docs/troubleshooting.md) — it is almost
-always the baud rate or swapped RX/TX.
+Scan something. Not getting anything out of the scanner? Turn on the **Raw
+UART Debug** switch and read [docs/troubleshooting.md](docs/troubleshooting.md)
+— it is almost always the baud rate or swapped RX/TX.
 
 ## How it fits together
 
 | Where | What it does |
 |---|---|
-| `esphome/` | Firmware. `espeep.yaml` holds every setting; `packages/` holds the parts |
-| `homeassistant/` | To-do list automation, mapping table, notification round trip |
-| `tests/` | Barcode validation and display wrapping, runnable without hardware |
-| `docs/` | Hardware, scanner modules, Home Assistant setup, troubleshooting |
+| `custom_components/espeep/` | The Home Assistant integration (HACS): product database, lookup, to-do list, panel |
+| `esphome/packages/` | The firmware, as ESPHome packages |
+| `esphome/espeep-dashboard.yaml` | Device file for the ESPHome dashboard — pulls the packages from GitHub |
+| `esphome/espeep.yaml` | Device file for the ESPHome command line, with every setting explained |
+| `tests/` | Integration tests against a real Home Assistant core, and the firmware's barcode and display logic |
+| `docs/` | Hardware, flashing, Home Assistant, scanner modules, troubleshooting |
 
-The barcode lookup runs **on the device** so the name appears on the OLED
-without waiting for a round trip. Home Assistant still decides what goes on the
-list: your mapping table beats Open Food Facts, and it pushes the final wording
-back to the display.
+The device sends each valid barcode to Home Assistant; the integration answers
+with the name that landed on the list, and the OLED shows it. Because all the
+knowledge lives in Home Assistant, renaming a product never means reflashing.
 
 ## Documentation
 
 - [Hardware and wiring](docs/hardware.md)
+- [Flashing with ESPHome](docs/esphome.md)
 - [Scanner modules and how to switch one to UART](docs/scanner-modules.md)
-- [Home Assistant setup](docs/home-assistant.md)
+- [Home Assistant integration and panel](docs/home-assistant.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
 ## Credits

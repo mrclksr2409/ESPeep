@@ -1,142 +1,164 @@
-# Home Assistant setup
+# Home Assistant integration
 
-The device resolves barcodes on its own, but Home Assistant owns the decisions:
-your mapping table beats Open Food Facts, the item goes on the to-do list, and
-unknown barcodes turn into a question on your phone.
+ESPeep's brain is a custom integration for Home Assistant. The device reads and
+validates barcodes; the integration does everything else:
 
-## 1. Adopt the device
+- keeps the **product database** — barcode → the name you want on the list
+- looks up barcodes it does not know yet in **Open Food Facts**, Open Products
+  Facts and Open Beauty Facts, and remembers the answer
+- puts the product on any **to-do list** — Local To-do, Shopping List, Bring!,
+  Mealie, … — without creating duplicates
+- **asks you for a name** when nobody knows a barcode, on your phone or in Home
+  Assistant
+- sends the result back to the **display**
 
-After flashing, Home Assistant discovers the ESPHome device automatically
-(*Settings → Devices & Services*). Adopt it and paste the
-`api_encryption_key` from your `secrets.yaml` when asked.
+Everything is managed from the **ESPeep panel** in the sidebar. No YAML, no
+files to copy, no shell commands.
 
-Check that the action `esphome.espeep_show_result` exists in *Developer tools →
-Actions*. If it does not, the device is not connected yet — the display will
-also say "Warte auf HA".
+## 1. Install with HACS
 
-## 2. Enable packages
+1. *HACS → ⋮ → Custom repositories*, add
+   `https://github.com/mrclksr2409/ESPeep` with category **Integration**.
+2. Search for **ESPeep** in HACS, install it.
+3. Restart Home Assistant.
 
-If your `configuration.yaml` does not have it already, add:
+<details>
+<summary>Without HACS</summary>
 
-```yaml
-homeassistant:
-  packages: !include_dir_named packages
-```
+Copy `custom_components/espeep/` from this repository to
+`config/custom_components/espeep/` and restart Home Assistant.
+</details>
 
-## 3. Copy the files
+## 2. Flash and adopt the device
 
-| From this repo | To your HA config |
+See [esphome.md](esphome.md). Once the device shows up under *Settings →
+Devices & Services → ESPHome*, continue here.
+
+## 3. Add the integration
+
+*Settings → Devices & Services → Add integration → ESPeep*.
+
+| Field | What to choose |
 |---|---|
-| `homeassistant/packages/espeep.yaml` | `config/packages/espeep.yaml` |
-| `homeassistant/packages/ean_mapping.yaml` | `config/packages/ean_mapping.yaml` |
-| `homeassistant/espeep_remember_ean.sh` | `config/espeep_remember_ean.sh` |
+| ESPeep device | The ESPHome device you just flashed |
+| Shopping list | Any `todo.` entity |
+| Phone | Optional. A `notify.mobile_app_…` service: unknown barcodes then arrive as a notification you can type the name into. Without it, you get a Home Assistant notification instead |
+| Look up unknown barcodes online | On by default. Off means only the product database is used |
+| Put the brand in front of the name | "Ferrero Nutella" instead of "Nutella", for names from the online databases |
+| Product name language | Empty uses Home Assistant's language |
 
-`ean_mapping.yaml` must sit next to `espeep.yaml`: the `!include` in the
-package resolves relative to the file containing it.
+Several scanners? Add the integration once per device. They share one product
+database, so a product named in the kitchen is known in the cellar too.
 
-## 4. Adjust three values
+All settings can be changed later under *Configure*.
 
-All three are defined in exactly one place, marked with `>>> <<<` in
-`espeep.yaml`:
+## 4. Try it
 
-| What | Where | Example |
-|---|---|---|
-| Your to-do list | `script.espeep_add_item` → `list_entity` | `todo.einkaufsliste` |
-| Your phone | `script.espeep_ask_for_name` → `notify_service` | `notify.mobile_app_pixel_9` |
-| The device action | `script.espeep_show_result` → the `action:` key | only if you changed `device_name` |
-
-Find the list under *Developer tools → States*, filtered to `todo.` — any
-to-do entity works, whether it comes from Local To-do, Bring! or Mealie. Find
-the notify service under *Developer tools → Actions*, filtered to
-`notify.mobile_app`.
-
-## 5. Restart and check
-
-Restart Home Assistant (the package adds new top-level keys, which a reload
-does not pick up). Then verify without touching the hardware — *Developer
-tools → Events → Fire event*:
+Scan something. Or, without the hardware, run the action **ESPeep: Scan** in
+*Developer tools → Actions*:
 
 ```yaml
-event_type: esphome.espeep_scan
-event_data:
-  ean: "4008400202037"
-  name: "Ferrero Nutella"
-  brand: "Ferrero"
-  quantity: "450 g"
-  source: "off"
+action: espeep.scan
+data:
+  ean: "3017620422003"
 ```
 
-"Ferrero Nutella" should appear on your list. Firing the same event again
-should *not* add it twice.
+The response says what happened, and Nutella should be on your list.
 
-Then try an unknown one — `source: "none"` and an empty `name`:
+## The ESPeep panel
 
-```yaml
-event_type: esphome.espeep_scan
-event_data:
-  ean: "9999999999993"
-  name: ""
-  brand: ""
-  quantity: ""
-  source: "none"
-```
+The sidebar entry **ESPeep** is where you manage everything:
 
-That should put a notification with a text field on your phone.
+- **Unbekannte Barcodes** — barcodes that were scanned but nobody could name.
+  Type a name and choose *Speichern + auf Liste*, or look them up online once
+  more.
+- **Produkt anlegen** — add a barcode by hand. *Online nachschlagen* fills in
+  what the databases know, and you shorten the name to what you actually want
+  on the list.
+- **Produkte** — the whole database: search, edit, delete, or put a product on
+  the list with 🛒 without scanning it.
+- **Letzte Scans** — what happened on the last scans, and on which scanner.
+- **Import / Export** — paste lines like `4008400202037;Milch`, or the contents
+  of the old `ean_mapping.yaml`; export as CSV or JSON.
 
-## How resolution works
+Every barcode is check-digit validated, in the panel just as on the device.
+
+## How a barcode is resolved
 
 ```
 barcode
-  ├─ in ean_mapping.yaml?          -> that name wins
-  ├─ else: name from Open Food Facts (looked up on the device)
-  └─ else: push notification asking you for a name
-            └─ your reply is written into ean_mapping.yaml
-               and used from then on
+  ├─ in the product database?   -> that name (yours wins, always)
+  ├─ else: online databases     -> name stored in the database, used from now on
+  └─ else: ask you              -> phone notification or HA notification
+                                   + listed in the panel under "Unbekannte Barcodes"
 ```
 
-The mapping table is the reason this stays usable long-term. Open Food Facts
-knows the product as "Ja! Haltbare Fettarme Milch 1,5% 1l"; what belongs on a
-shopping list is "Milch". Put the short name in `ean_mapping.yaml` and it wins
-from the next scan onwards.
+Online results are stored as they come, marked *online*. Rename one in the
+panel and it becomes *your* name — the online databases will never overwrite
+it. That is how "Ja! Haltbare Fettarme Milch 1,5% 1l" becomes "Milch" for good.
 
-Always quote the barcode in that file. Unquoted, YAML reads it as a number and
-strips leading zeros, and the lookup silently never matches.
+## Entities
 
-After editing `ean_mapping.yaml` by hand, run the action `template.reload` (or
-restart) so the change is picked up.
+Each scanner gets, on its device page:
 
-## About the shell command
+| Entity | |
+|---|---|
+| `sensor.<device>_last_scan` | Name of the last scanned product; `ean`, `result` and `source` as attributes |
+| `sensor.<device>_unknown_barcodes` | How many barcodes wait for a name — good for a dashboard badge |
+| `sensor.<device>_known_products` | Size of the product database (diagnostic) |
+| `switch.<device>_add_to_shopping_list` | Off = catalogue mode: scans are resolved and learned, but nothing is put on the list. Handy for the first evening, when you walk through the pantry |
 
-Storing an answer from your phone means appending a line to a file, and Home
-Assistant has no native action that writes to disk — `shell_command` is the
-only built-in way. Two things keep that safe:
+## Actions
 
-- the automation strips the reply down to a fixed character set before passing
-  it on, so no quote, backslash, `$` or newline survives
-- `espeep_remember_ean.sh` takes the values as **arguments** rather than having
-  them interpolated into a shell string, and re-checks them before writing
+| Action | |
+|---|---|
+| `espeep.scan` | Handle a barcode as if it had been scanned. Returns the outcome |
+| `espeep.set_product` | Store a name (and optionally brand and quantity) for a barcode |
+| `espeep.remove_product` | Forget a barcode |
+| `espeep.get_products` | Return the product database, unknown barcodes and recent scans |
 
-### If you would rather not run a shell command
+## Event for your own automations
 
-Delete the `shell_command:` block and the `espeep_learn_name` automation, and
-maintain `ean_mapping.yaml` by hand in git. Unknown barcodes then only produce
-the push notification and the "Unbekannt" display — you add the entry yourself
-and re-scan. Everything else keeps working unchanged.
+After every scan the integration fires `espeep_scanned`:
 
-## Notes on the implementation
+```yaml
+event_type: espeep_scanned
+data:
+  ean: "3017620422003"
+  name: "Ferrero Nutella"
+  result: added        # added | already_listed | recognised | unknown |
+                       # lookup_failed | list_failed | invalid
+  source: online       # user | online
+  device_id: 1a2b3c…
+```
 
-A few choices that are not obvious from reading the YAML:
+For example, to announce unknown products on a speaker:
 
-- **`mode: queued`** on both automations. Scanning three items in a row must
-  process all three; `single` would silently drop the second and third.
-- **`todo.get_items` before `todo.add_item`.** Without it, scanning the same
-  product on two shopping trips puts it on the list twice.
-- **The barcode travels in the notification's action name**
-  (`ESPEEP_NAME_<barcode>`). It is the only field the companion app reliably
-  returns alongside the reply text.
-- **`sensor.espeep_ean_mapping` is a YAML template sensor, not a UI helper.**
-  A Template Helper created through the UI would be preferable, but its config
-  flow has no field for `attributes:`, which is what carries the table.
-- **`continue_on_error` on the display callback.** If the device is unplugged
-  when Home Assistant answers, the item is still on the list — that is the part
-  that matters.
+```yaml
+triggers:
+  - trigger: event
+    event_type: espeep_scanned
+    event_data:
+      result: unknown
+actions:
+  - action: tts.speak
+    target:
+      entity_id: tts.home_assistant_cloud
+    data:
+      media_player_entity_id: media_player.kueche
+      message: "Den Artikel kenne ich nicht. Gib ihm bitte einen Namen."
+```
+
+## Coming from the YAML package (ESPeep 1.x)
+
+1. Delete `config/packages/espeep.yaml` and `config/espeep_remember_ean.sh`
+   and restart.
+2. Install the integration as above and flash the new firmware — the device no
+   longer looks products up itself.
+3. Open `config/packages/ean_mapping.yaml`, copy its contents into the
+   panel's **Import** box and import. Then delete the file.
+
+## Where the data lives
+
+`config/.storage/espeep.products` — included in every Home Assistant backup.
+Edit it only through the panel or the actions.

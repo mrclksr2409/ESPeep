@@ -7,6 +7,16 @@
 # means a new module usually only needs a different baud rate.
 #
 # See docs/scanner-modules.md for how to switch a module into UART mode.
+#
+# A valid barcode is handed to Home Assistant as the event
+# `esphome.espeep_scan`. The ESPeep integration resolves it, puts it on the
+# list and answers through the `show_result` action in base.yaml.
+
+substitutions:
+  scanner_rx_pin: GPIO16
+  scanner_tx_pin: GPIO17
+  scanner_baud: "57600"
+  rescan_guard_ms: "3000"
 
 uart:
   id: scanner_uart
@@ -24,9 +34,8 @@ globals:
     restore_value: false
     initial_value: '""'
 
-  # The barcode currently being looked up. lookup.yaml reads this from inside
-  # its on_response lambda, where script parameters are not visible
-  # (esphome/esphome#10363).
+  # The barcode Home Assistant is currently resolving. Shown again if no
+  # answer arrives (base.yaml).
   - id: current_ean
     type: std::string
     restore_value: false
@@ -120,8 +129,24 @@ script:
 
           ESP_LOGI("espeep", "Accepted barcode %s", code.c_str());
           id(last_barcode).publish_state(code);
+
+          if (!id(ha_api).is_connected()) {
+            id(ui_set)->execute("error", "Keine Verbindung zu HA", code);
+            return;
+          }
           id(ui_set)->execute("read", code, "Suche Produkt...");
-          id(lookup_product)->execute();
+          id(report_scan)->execute();
+
+  # Hand the barcode to Home Assistant. The ESPHome integration adds this
+  # device's id to the event, which is how the ESPeep integration tells
+  # several scanners apart.
+  - id: report_scan
+    then:
+      - homeassistant.event:
+          event: esphome.espeep_scan
+          data:
+            ean: !lambda return id(current_ean);
+            device_name: ${device_name}
 
 interval:
   - interval: 20ms

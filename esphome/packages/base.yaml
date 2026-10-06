@@ -1,21 +1,40 @@
 # ESPeep — base device configuration.
 #
-# Owns everything that is not specific to scanning: board, connectivity,
-# logging and OTA — plus the small UI state machine that `display.yaml`
-# renders and `feedback.yaml` turns into sounds.
+# Owns everything that is not specific to scanning: board, logging, the API
+# action Home Assistant answers through, plus the small UI state machine that
+# `display.yaml` renders and `feedback.yaml` turns into sounds.
 #
-# All tunables come from the substitutions in ../espeep.yaml.
+# WiFi, API key and OTA password are deliberately NOT in here: they belong to
+# your own device file (espeep.yaml, or the one the ESPHome dashboard created),
+# so this package can be pulled straight from GitHub.
+#
+# The substitutions below are defaults. Override any of them in your device
+# file — its substitutions win over the ones from packages.
+
+substitutions:
+  device_name: espeep
+  friendly_name: ESPeep
+  esp32_board: esp32dev
+  log_level: INFO
+  status_led_pin: GPIO2
+  status_led_inverted: "false"
+  result_hold_ms: "6000"
+  # How long to wait for Home Assistant's answer before showing an error.
+  ha_timeout_ms: "15000"
 
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}
   comment: "EAN scanner feeding the Home Assistant shopping list"
+  # Lets the ESPeep integration recognise the device: Home Assistant shows
+  # it as manufacturer "mrclksr2409", model "espeep".
+  project:
+    name: mrclksr2409.espeep
+    version: "2.0.0"
 
 esp32:
   board: ${esp32_board}
   framework:
-    # esp-idf ships Mozilla's root CA bundle, which is what lets the
-    # Open Food Facts lookup in lookup.yaml run with verify_ssl: true.
     type: esp-idf
 
 logger:
@@ -23,12 +42,9 @@ logger:
 
 api:
   id: ha_api
-  encryption:
-    key: !secret api_encryption_key
   actions:
-    # Home Assistant calls this back after it has applied the EAN mapping
-    # table, so the display ends up showing the name that actually landed on
-    # the shopping list — not just what Open Food Facts returned.
+    # The ESPeep integration calls this with the outcome of every scan: the
+    # name that landed on the list, "unknown", or an error.
     # Exposed to HA as the action `esphome.${device_name}_show_result`.
     - action: show_result
       variables:
@@ -39,20 +55,6 @@ api:
         - lambda: |-
             id(ui_set)->execute(status, title, detail);
 
-ota:
-  - platform: esphome
-    password: !secret ota_password
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  # Fallback AP so the device stays reachable if the WiFi credentials are wrong.
-  ap:
-    ssid: "${friendly_name} Setup"
-    password: !secret ap_password
-
-captive_portal:
-
 status_led:
   pin:
     number: ${status_led_pin}
@@ -62,11 +64,12 @@ status_led:
 # --- Shared UI state -------------------------------------------------------
 #
 # Every package reports what happened by calling the `ui_set` script instead
-# of touching the display or the buzzer directly. That keeps the scan and
-# lookup logic free of presentation details and gives us exactly one place
+# of touching the display or the buzzer directly. That keeps the scan logic
+# free of presentation details and gives us exactly one place
 # where a new state has to be handled.
 #
-# States: "idle" | "read" | "busy" | "ok" | "unknown" | "error"
+# States: "idle" | "read" | "ok" | "unknown" | "error"
+#   read = barcode accepted and sent, waiting for Home Assistant
 
 globals:
   - id: ui_state
@@ -108,11 +111,17 @@ script:
       - script.execute: ui_feedback
 
 interval:
-  # Return to the idle screen once a result has been on display long enough.
   - interval: 500ms
     then:
       - lambda: |-
-          if (id(ui_state) != "idle" && id(ui_state) != "busy" &&
+          // Home Assistant never answered: integration not set up, HA
+          // restarting, or the device not adopted.
+          if (id(ui_state) == "read" && millis() - id(ui_since) > ${ha_timeout_ms}) {
+            id(ui_set)->execute("error", "Keine Antwort von HA", id(current_ean));
+            return;
+          }
+          // Return to the idle screen once a result has been on display long enough.
+          if (id(ui_state) != "idle" && id(ui_state) != "read" &&
               millis() - id(ui_since) > ${result_hold_ms}) {
             id(ui_state) = "idle";
             id(ui_title) = "";

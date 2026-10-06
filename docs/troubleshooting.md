@@ -14,7 +14,7 @@ tells you where it stopped.
 | `Discarding overlong UART line` | Wrong baud rate, or the module streams continuously | Try the other baud rates, see [scanner-modules.md](scanner-modules.md) |
 | `Ignoring barcode with unexpected length` | Not a product barcode — a QR code, a loyalty card, a shelf label | Nothing to fix; ESPeep only accepts 8, 12, 13 and 14 digit codes |
 | `Barcode … failed the check digit test` | Misread | See "Check digit errors" below |
-| `Accepted barcode …` then nothing | The lookup or Home Assistant side | Check the next sections |
+| `Accepted barcode …` then nothing | The Home Assistant side | Check the next sections |
 
 ## Nothing arrives over UART
 
@@ -61,68 +61,59 @@ buzzer. An active buzzer contains its own oscillator, only understands on and
 off, and will render every tune as one flat beep. If yours has a sticker over
 the top and beeps when you put 3.3 V across it, it is active — swap it.
 
-## Display says "Kein WLAN" or "Keine Verbindung"
+## What the display tells you
 
-- "Kein WLAN" — the device is not on the network. Check `secrets.yaml`; the
-  fallback access point `ESPeep Setup` comes up if the credentials are wrong.
-- "Keine Verbindung" — WiFi is up but Open Food Facts could not be reached.
-  Usually DNS or an outbound restriction on the network.
-- "Server-Fehler HTTP 429" — you are being rate limited. That means an unusual
-  number of scans in a short time; it clears on its own.
+| Display | Meaning | Fix |
+|---|---|---|
+| "Warte auf HA" (idle) | On WiFi, but Home Assistant is not connected | Adopt the device under *Settings → Devices & Services → ESPHome*; check that the API key matches |
+| "Kein WLAN" (idle) | Not on the network | Check the WiFi credentials; the fallback access point `ESPeep Setup` comes up if they are wrong |
+| "Keine Verbindung zu HA" | A barcode was read while Home Assistant was not connected | As for "Warte auf HA" |
+| "Keine Antwort von HA" | The scan was sent, but nobody answered within 15 s | The ESPeep integration is not set up for this device — see below |
+| "Keine Verbindung" | Home Assistant could not reach any online product database | Check Home Assistant's internet access. Barcodes already in the product database keep working |
+| "Liste nicht erreichbar" | Adding to the to-do list failed | The list entity is unavailable (e.g. Bring! offline) or was removed; check *Settings → Devices & Services → ESPeep → Configure* |
+| "In HA benennen" | No database knows the barcode | Name it in the notification on your phone or in the **ESPeep** panel |
 
-Note that Home Assistant can still resolve the barcode from your mapping table
-when the internet lookup fails — the scan is reported either way.
+## "Keine Antwort von HA" after every scan
 
-## Display says "Warte auf HA"
+The device sends the barcode as the event `esphome.espeep_scan`, and the
+ESPeep integration answers. If no answer arrives:
 
-The device is on WiFi but not connected to Home Assistant. Check that the
-device is adopted under *Settings → Devices & Services* and that the
-`api_encryption_key` in `secrets.yaml` matches what you gave Home Assistant.
+1. Check that the integration is set up **for this device**: *Settings →
+   Devices & Services → ESPeep*. Each scanner needs its own entry.
+2. Watch the event arrive: *Developer tools → Events*, listen to
+   `esphome.espeep_scan`, and scan something. No event means the ESPHome
+   connection is the problem; an event with a `device_id` that does not match
+   the device you selected means you picked the wrong device in the setup.
+3. Simulate a scan without hardware with the action `espeep.scan`
+   (*Developer tools → Actions*). Its response tells you exactly what happened.
 
 ## Items do not appear on the list
 
-Test the Home Assistant side without the hardware — *Developer tools → Events
-→ Fire event*:
+Run the action `espeep.scan` with a barcode, e.g. `3017620422003`, and look at
+the response:
 
-```yaml
-event_type: esphome.espeep_scan
-event_data:
-  ean: "3017620422003"
-  name: "Ferrero Nutella"
-  brand: "Ferrero"
-  quantity: "400 g"
-  source: "off"
-```
+- `result: list_failed` → the to-do entity does not work. Check it in
+  *Settings → Devices & Services → ESPeep → Configure*, and check the Home
+  Assistant log for the reason.
+- `result: recognised` → the switch **Add to shopping list** of that scanner is
+  off (catalogue mode).
+- `result: already_listed` → an open item with the same name is already on the
+  list.
 
-- Nothing happens at all → the package is not loaded. Check that
-  `homeassistant: packages: !include_dir_named packages` is in
-  `configuration.yaml` and that you restarted (a reload is not enough for a new
-  package).
-- The automation runs but errors → open its trace. Almost always the
-  `list_entity` in `script.espeep_add_item` does not match a real to-do entity.
+## A product gets the wrong name
 
-## The mapping table is ignored
+Open the **ESPeep** panel in the sidebar, search for it and edit the name. Your
+name is used from the next scan on and is never overwritten by an online
+database. Products marked *online* came from Open Food Facts and friends;
+edited ones are marked *eigener Name*.
 
-- **The barcode is not quoted.** `4008400202037: Milch` is parsed as a number
-  and the leading-zero handling differs; it will never match. Write
-  `"4008400202037": "Milch"`.
-- **Templates were not reloaded.** After editing `ean_mapping.yaml` by hand,
-  run the `template.reload` action.
-- Check what Home Assistant actually loaded: *Developer tools → Template*:
+## The reply on the phone is not stored
 
-  ```jinja
-  {{ state_attr('sensor.espeep_ean_mapping', 'map') }}
-  ```
-
-## The "unknown product" reply is not stored
-
-- Check the exit code in the automation trace. `espeep_remember_ean.sh` refuses
-  anything that does not look like a barcode, and refuses names containing a
-  double quote.
-- Confirm the script is at `/config/espeep_remember_ean.sh` and the mapping
-  file at `/config/packages/ean_mapping.yaml` — those paths are hard-coded in
-  the `shell_command` and must match where you copied the files.
-- A failure raises a persistent notification with the exit code and stderr.
+- The notification has to come from the ESPeep integration — check that a
+  `notify.mobile_app_…` service is selected in the integration's options.
+- Text input in notifications needs the Home Assistant companion app; other
+  notify services only show the message. Name the barcode in the panel
+  instead — it is listed under *Unbekannte Barcodes*.
 
 ## Same product added twice
 
