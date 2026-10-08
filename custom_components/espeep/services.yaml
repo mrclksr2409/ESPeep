@@ -27,6 +27,19 @@ remove_product:
       selector:
         text:
 
+add_barcode:
+  fields:
+    product:
+      required: true
+      example: "4008400202037"
+      selector:
+        text:
+    ean:
+      required: true
+      example: "4008400401027"
+      selector:
+        text:
+
 get_products:
 
 scan:

@@ -22,12 +22,14 @@ from .scanner import EspeepScanner
 SERVICE_SET_PRODUCT = "set_product"
 SERVICE_REMOVE_PRODUCT = "remove_product"
 SERVICE_GET_PRODUCTS = "get_products"
+SERVICE_ADD_BARCODE = "add_barcode"
 SERVICE_SCAN = "scan"
 
 ATTR_EAN = "ean"
 ATTR_NAME = "name"
 ATTR_BRAND = "brand"
 ATTR_QUANTITY = "quantity"
+ATTR_PRODUCT = "product"
 
 
 def _ean(value: object) -> str:
@@ -51,6 +53,9 @@ SET_PRODUCT_SCHEMA = vol.Schema(
     }
 )
 REMOVE_PRODUCT_SCHEMA = vol.Schema({vol.Required(ATTR_EAN): _ean})
+ADD_BARCODE_SCHEMA = vol.Schema(
+    {vol.Required(ATTR_PRODUCT): _ean, vol.Required(ATTR_EAN): _ean}
+)
 SCAN_SCHEMA = vol.Schema(
     {
         # Not validated here: an invalid barcode is a legitimate test input.
@@ -92,6 +97,15 @@ def async_register_services(hass: HomeAssistant) -> None:
                 translation_placeholders={"ean": call.data[ATTR_EAN]},
             )
 
+    async def add_barcode(call: ServiceCall) -> None:
+        if store.async_add_ean(call.data[ATTR_PRODUCT], call.data[ATTR_EAN]) is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unknown_product",
+                translation_placeholders={"ean": call.data[ATTR_PRODUCT]},
+            )
+        async_named(hass, call.data[ATTR_EAN])
+
     async def get_products(call: ServiceCall) -> ServiceResponse:
         return store.as_dict()
 
@@ -104,6 +118,9 @@ def async_register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_REMOVE_PRODUCT, remove_product, schema=REMOVE_PRODUCT_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_ADD_BARCODE, add_barcode, schema=ADD_BARCODE_SCHEMA
     )
     hass.services.async_register(
         DOMAIN,

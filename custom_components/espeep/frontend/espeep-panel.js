@@ -65,6 +65,8 @@ class EspeepPanel extends HTMLElement {
     this._data = { products: {}, unknown: {}, history: [], scanners: [] };
     this._filter = "";
     this._editing = null;
+    // Further barcodes in the product form, saved together with it.
+    this._formEans = [];
     this._message = null;
     this._unsub = null;
     this._rendered = false;
@@ -122,6 +124,23 @@ class EspeepPanel extends HTMLElement {
     }
   }
 
+  // Barcode the product with this barcode is stored under, if any.
+  _owner(code) {
+    if (this._data.products[code]) return code;
+    return Object.keys(this._data.products).find((key) => (this._data.products[key].eans || []).includes(code)) || null;
+  }
+
+  _byName(name) {
+    const wanted = name.trim().toLowerCase();
+    return Object.keys(this._data.products).find((key) => this._data.products[key].name.toLowerCase() === wanted) || null;
+  }
+
+  _startForm(ean) {
+    this._editing = ean;
+    this._formEans = ean ? [...(this._data.products[ean].eans || [])] : [];
+    this._resetForm = true;
+  }
+
   _flash(text, error = false) {
     this._message = { text, error };
     this._render();
@@ -166,7 +185,10 @@ class EspeepPanel extends HTMLElement {
         ${this._renderProducts()}
         ${this._renderHistory()}
         ${this._renderImport()}
-      </div>`;
+      </div>
+      <datalist id="product-names">${[...new Set(Object.values(this._data.products).map((p) => p.name))]
+        .map((name) => `<option value="${esc(name)}"></option>`)
+        .join("")}</datalist>`;
 
     const menu = root.querySelector("ha-menu-button");
     if (menu) {
@@ -208,13 +230,14 @@ class EspeepPanel extends HTMLElement {
     return `<div class="card">
       <h2>Unbekannte Barcodes <span class="badge">${entries.length}</span></h2>
       <p class="hint">Gescannt, aber in keiner Datenbank gefunden. Gib ihnen einen Namen –
-      ab dann werden sie sofort erkannt.</p>
+      ab dann werden sie sofort erkannt. Der Name eines vorhandenen Produkts ordnet den
+      Barcode diesem Produkt zu (z. B. die fettarme Milch zu „Milch“).</p>
       ${entries
         .map(
           ([ean, info]) => `
         <div class="row unknown" data-ean="${esc(ean)}">
           <div class="ean">${esc(ean)}<small>${info.count}× gescannt, zuletzt ${esc(fmtTime(info.last_seen))}</small></div>
-          <input id="unk-${esc(ean)}" placeholder="Name, z. B. Milch" />
+          <input id="unk-${esc(ean)}" list="product-names" placeholder="Name, z. B. Milch" />
           <div class="actions">
             ${canList ? `<button class="primary" data-action="learn">Speichern + auf Liste</button>` : ""}
             <button data-action="name-only">Nur speichern</button>
@@ -246,6 +269,24 @@ class EspeepPanel extends HTMLElement {
           <input id="f-quantity" value="${esc(product ? product.quantity : "")}" />
         </label>
       </div>
+      <div class="aliases">
+        <label>Weitere Barcodes – Varianten, die unter demselben Namen auf die Liste kommen
+          <div class="alias-add">
+            <input id="f-alias" inputmode="numeric" placeholder="z. B. Barcode der fettarmen Milch" />
+            <button data-action="add-ean">Hinzufügen</button>
+          </div>
+        </label>
+        ${
+          this._formEans.length
+            ? `<div class="chips">${this._formEans
+                .map(
+                  (code) =>
+                    `<span class="chip mono" data-alias="${esc(code)}">${esc(code)}<button data-action="remove-ean" title="Entfernen">✕</button></span>`,
+                )
+                .join("")}</div>`
+            : ""
+        }
+      </div>
       <div class="actions">
         <button class="primary" data-action="save">${editing ? "Änderungen speichern" : "Anlegen"}</button>
         <button data-action="lookup">Online nachschlagen</button>
@@ -261,6 +302,7 @@ class EspeepPanel extends HTMLElement {
         ([ean, p]) =>
           !filter ||
           ean.includes(filter) ||
+          (p.eans || []).some((code) => code.includes(filter)) ||
           p.name.toLowerCase().includes(filter) ||
           (p.brand || "").toLowerCase().includes(filter),
       )
@@ -280,7 +322,11 @@ class EspeepPanel extends HTMLElement {
           .map(
             ([ean, p]) => `<tr data-ean="${esc(ean)}">
             <td><b>${esc(p.name)}</b></td>
-            <td class="mono">${esc(ean)}</td>
+            <td class="mono">${esc(ean)}${
+              p.eans && p.eans.length
+                ? `<small title="${esc(p.eans.join(", "))}"> +${p.eans.length} weitere</small>`
+                : ""
+            }</td>
             <td class="wide">${esc([p.brand, p.quantity].filter(Boolean).join(" · ") || "–")}</td>
             <td class="wide"><span class="tag ${esc(p.source)}">${esc(SOURCE_LABELS[p.source] || p.source)}</span></td>
             <td class="wide">${p.scans || 0}</td>
@@ -327,7 +373,8 @@ class EspeepPanel extends HTMLElement {
       <p class="hint">Eine Zeile pro Produkt, Barcode und Name getrennt durch
       <code>;</code>, <code>,</code>, Tab oder <code>:</code>. Das Format der
       alten <code>ean_mapping.yaml</code> (<code>"4008400202037": "Milch"</code>)
-      funktioniert direkt.</p>
+      funktioniert direkt. Barcodes mit gleichem Namen werden ein Produkt mit
+      mehreren Barcodes.</p>
       <textarea id="import-text" rows="6" placeholder='"4008400202037": "Milch"&#10;4104420045200;Spülmaschinentabs'></textarea>
       <div class="actions">
         <button class="primary" data-action="import">Importieren</button>
@@ -365,6 +412,9 @@ class EspeepPanel extends HTMLElement {
         if (ev.key === "Enter") this._onAction(ev, "save");
       }),
     );
+    root.getElementById("f-alias").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") this._onAction(ev, "add-ean");
+    });
   }
 
   async _onAction(ev, action) {
@@ -377,13 +427,10 @@ class EspeepPanel extends HTMLElement {
       case "name-only": {
         const name = root.getElementById(`unk-${ean}`).value.trim();
         if (!name) return this._flash("Bitte einen Namen eingeben.", true);
-        if (action === "learn") {
-          const result = await this._ws({ type: "espeep/learn", ean, name });
-          this._flash(`„${result.name}“: ${RESULT_LABELS[result.result] || result.result}`);
-        } else {
-          await this._ws({ type: "espeep/set", ean, name });
-          this._flash(`„${name}“ gespeichert.`);
-        }
+        const joins = this._byName(name) !== null;
+        const result = await this._ws({ type: "espeep/learn", ean, name, add_to_list: action === "learn" });
+        const saved = joins ? `Als weiterer Barcode von „${result.name}“ gespeichert` : `„${result.name}“ gespeichert`;
+        this._flash(action === "learn" ? `${saved}: ${RESULT_LABELS[result.result] || result.result}` : `${saved}.`);
         break;
       }
       case "lookup-unknown": {
@@ -404,23 +451,73 @@ class EspeepPanel extends HTMLElement {
         const code = validEan(value("f-ean"));
         if (!code) return this._flash("Kein gültiger Barcode (Länge oder Prüfziffer).", true);
         if (!value("f-name")) return this._flash("Bitte einen Namen eingeben.", true);
-        if (!this._editing && this._data.products[code]) {
-          if (!confirm(`${code} ist schon als „${this._data.products[code].name}“ gespeichert. Überschreiben?`))
-            return;
+        const owner = this._owner(code);
+        const current = this._editing ? this._owner(this._editing) : null;
+        // Same name as another product: offer to make these its barcodes.
+        const twin = this._byName(value("f-name"));
+        let message;
+        if (twin !== null && twin !== current && twin !== owner) {
+          const target = this._data.products[twin];
+          if (!confirm(`„${target.name}“ gibt es schon. ${code} dort als weiteren Barcode zuordnen?`)) return;
+          const eans = [...(target.eans || []), ...(this._editing ? [this._editing] : []), code, ...this._formEans];
+          message = {
+            type: "espeep/set",
+            ean: twin,
+            name: target.name,
+            brand: target.brand || "",
+            quantity: target.quantity || "",
+            eans: [...new Set(eans)].filter((e) => e !== twin),
+          };
+        } else {
+          if (owner !== null && owner !== current) {
+            if (!confirm(`${code} ist schon als „${this._data.products[owner].name}“ gespeichert. Überschreiben?`))
+              return;
+          }
+          message = {
+            type: "espeep/set",
+            ean: code,
+            name: value("f-name"),
+            brand: value("f-brand"),
+            quantity: value("f-quantity"),
+            eans: this._formEans.filter((e) => e !== code),
+          };
+          if (this._editing) message.previous_ean = this._editing;
         }
-        const message = {
-          type: "espeep/set",
-          ean: code,
-          name: value("f-name"),
-          brand: value("f-brand"),
-          quantity: value("f-quantity"),
-        };
-        if (this._editing) message.previous_ean = this._editing;
         await this._ws(message);
-        this._editing = null;
-        this._resetForm = true;
-        ["f-ean", "f-name", "f-brand", "f-quantity"].forEach((id) => (root.getElementById(id).value = ""));
+        this._startForm(null);
+        ["f-ean", "f-name", "f-brand", "f-quantity", "f-alias"].forEach((id) => (root.getElementById(id).value = ""));
         this._flash(`„${message.name}“ gespeichert.`);
+        break;
+      }
+      case "add-ean": {
+        const input = root.getElementById("f-alias");
+        const code = validEan(input.value);
+        if (!code) return this._flash("Kein gültiger Barcode (Länge oder Prüfziffer).", true);
+        const main = validEan(root.getElementById("f-ean").value);
+        if (code === main || this._formEans.includes(code)) {
+          input.value = "";
+          return;
+        }
+        const owner = this._owner(code);
+        const current = this._editing ? this._owner(this._editing) : null;
+        if (owner !== null && owner !== current) {
+          const other = this._data.products[owner];
+          const what =
+            owner === code
+              ? `${code} ist als eigenes Produkt „${other.name}“ gespeichert. Beim Speichern hier zusammenführen?`
+              : `${code} gehört zu „${other.name}“. Hierher verschieben?`;
+          if (!confirm(what)) return;
+        }
+        this._formEans.push(code);
+        input.value = "";
+        this._render();
+        root.getElementById("f-alias").focus();
+        break;
+      }
+      case "remove-ean": {
+        const code = ev.target.closest("[data-alias]").dataset.alias;
+        this._formEans = this._formEans.filter((e) => e !== code);
+        this._render();
         break;
       }
       case "lookup": {
@@ -436,22 +533,21 @@ class EspeepPanel extends HTMLElement {
         break;
       }
       case "cancel":
-        this._editing = null;
-        this._resetForm = true;
+        this._startForm(null);
         this._render();
         break;
       case "edit":
-        this._editing = ean;
-        this._resetForm = true;
+        this._startForm(ean);
         this._render();
         root.getElementById("f-name").focus();
         root.querySelector(".card h2").scrollIntoView({ behavior: "smooth" });
         break;
       case "delete": {
         const product = this._data.products[ean];
-        if (!confirm(`„${product.name}“ (${ean}) löschen?`)) return;
+        const more = product.eans && product.eans.length ? ` und ${product.eans.length} weitere Barcodes` : "";
+        if (!confirm(`„${product.name}“ (${ean}${more}) löschen?`)) return;
         await this._ws({ type: "espeep/delete", ean });
-        if (this._editing === ean) this._editing = null;
+        if (this._editing === ean) this._startForm(null);
         break;
       }
       case "list": {
@@ -466,8 +562,11 @@ class EspeepPanel extends HTMLElement {
         await this._import();
         break;
       case "export-csv": {
-        const lines = Object.entries(this._data.products).map(
-          ([code, p]) => [code, p.name, p.brand, p.quantity].map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(";"),
+        // One line per barcode; the import joins lines with the same name again.
+        const lines = Object.entries(this._data.products).flatMap(([code, p]) =>
+          [code, ...(p.eans || [])].map((e) =>
+            [e, p.name, p.brand, p.quantity].map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(";"),
+          ),
         );
         this._download("espeep-produkte.csv", ["ean;name;brand;quantity", ...lines].join("\n"), "text/csv");
         break;
@@ -826,7 +925,7 @@ class EspeepPanel extends HTMLElement {
     } else if (scan.naming) {
       status = `<div class="scan-status warn">
         <b class="mono">${esc(scan.naming)}</b> kennt keine Datenbank. Wie soll er auf der Liste heißen?
-        <input id="scan-name" placeholder="Name, z. B. Milch" />
+        <input id="scan-name" list="product-names" placeholder="Name, z. B. Milch" />
         <div class="actions">
           <button class="primary" id="scan-learn">Speichern + auf Liste</button>
           <button id="scan-skip">Später</button>
@@ -962,6 +1061,15 @@ const STYLE = `
   .tag.user, .tag.r-added { background: rgba(76,175,80,.2); }
   .tag.online { background: rgba(33,150,243,.2); }
   .tag.r-unknown, .tag.r-lookup_failed, .tag.r-list_failed, .tag.r-invalid { background: rgba(244,67,54,.2); }
+  .aliases { margin-top: 12px; }
+  .alias-add { display: flex; gap: 8px; }
+  .alias-add input { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
+    padding: 2px 4px 2px 10px; border-radius: 14px; background: var(--secondary-background-color);
+  }
+  .chip button { border: none; padding: 0 6px; color: var(--secondary-text-color); }
   .row.unknown { display: grid; grid-template-columns: 200px 1fr; gap: 8px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--divider-color); }
   .row.unknown .actions { grid-column: 1 / -1; margin-top: 0; }
   .ean { font-family: var(--code-font-family, monospace); font-size: 15px; }

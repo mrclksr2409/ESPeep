@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "espeep"
-VERSION: Final = "2.1.0"
+VERSION: Final = "2.2.0"
 
 # Fired by the firmware (esphome/packages/scanner.yaml). The ESPHome
 # integration adds the Home Assistant `device_id` of the sender to the data.

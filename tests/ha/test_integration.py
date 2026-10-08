@@ -8,6 +8,7 @@ from homeassistant import config_entries
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -431,3 +432,191 @@ async def test_panel_script_is_served(
     response = await client.get("/espeep_static/espeep-panel.js")
     assert response.status == 200
     assert 'customElements.define("espeep-panel"' in await response.text()
+
+
+VOLLMILCH = "4008400202037"
+FETTARM = "5449000000996"
+
+
+async def test_product_with_several_barcodes(
+    hass: HomeAssistant, esphome_device, env
+) -> None:
+    await _setup(hass, esphome_device, env, **{CONF_ONLINE_LOOKUP: False})
+    await hass.services.async_call(
+        DOMAIN, "set_product", {"ean": VOLLMILCH, "name": "Milch"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN, "add_barcode", {"product": VOLLMILCH, "ean": FETTARM}, blocking=True
+    )
+
+    # Either barcode puts the one name on the list, and only once.
+    await _scan(hass, esphome_device, FETTARM)
+    assert env.items == ["Milch"]
+    assert env.display[-1]["title"] == "Milch"
+    await _scan(hass, esphome_device, VOLLMILCH)
+    assert env.items == ["Milch"]
+    assert env.display[-1]["detail"] == "Schon drauf"
+
+    products = await hass.services.async_call(
+        DOMAIN, "get_products", {}, blocking=True, return_response=True
+    )
+    assert list(products["products"]) == [VOLLMILCH]
+    assert products["products"][VOLLMILCH]["eans"] == [FETTARM]
+    assert products["products"][VOLLMILCH]["scans"] == 2
+    assert products["history"][1]["ean"] == FETTARM
+
+    # Renaming through a further barcode renames the product.
+    await hass.services.async_call(
+        DOMAIN, "set_product", {"ean": FETTARM, "name": "Frischmilch"}, blocking=True
+    )
+    # Removing a further barcode keeps the product.
+    await hass.services.async_call(
+        DOMAIN, "remove_product", {"ean": FETTARM}, blocking=True
+    )
+    products = await hass.services.async_call(
+        DOMAIN, "get_products", {}, blocking=True, return_response=True
+    )
+    assert products["products"][VOLLMILCH]["name"] == "Frischmilch"
+    assert products["products"][VOLLMILCH]["eans"] == []
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN, "add_barcode", {"product": NUTELLA, "ean": FETTARM}, blocking=True
+        )
+
+
+async def test_naming_with_existing_name_joins_product(
+    hass: HomeAssistant, esphome_device, env
+) -> None:
+    await _setup(
+        hass,
+        esphome_device,
+        env,
+        **{CONF_ONLINE_LOOKUP: False, CONF_NOTIFY_SERVICE: "notify.mobile_app_phone"},
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_product", {"ean": VOLLMILCH, "name": "Milch"}, blocking=True
+    )
+    await _scan(hass, esphome_device, UNKNOWN)
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": f"ESPEEP_NAME_{UNKNOWN}", "reply_text": "milch"},
+    )
+    await hass.async_block_till_done()
+
+    assert env.items == ["Milch"]
+    products = await hass.services.async_call(
+        DOMAIN, "get_products", {}, blocking=True, return_response=True
+    )
+    assert list(products["products"]) == [VOLLMILCH]
+    assert products["products"][VOLLMILCH]["eans"] == [UNKNOWN]
+    assert products["unknown"] == {}
+
+
+async def test_websocket_barcodes(
+    hass: HomeAssistant, esphome_device, env, hass_ws_client
+) -> None:
+    await _setup(hass, esphome_device, env, **{CONF_ONLINE_LOOKUP: False})
+    client = await hass_ws_client(hass)
+
+    async def call(message: dict[str, Any]) -> dict[str, Any]:
+        await client.send_json_auto_id(message)
+        return await client.receive_json()
+
+    # A product found online for one barcode ...
+    await hass.services.async_call(
+        DOMAIN, "set_product", {"ean": FETTARM, "name": "Fettarme Milch"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN, "scan", {"ean": FETTARM}, blocking=True, return_response=True
+    )
+    # ... is merged into "Milch" when its barcode is added there.
+    response = await call(
+        {
+            "type": "espeep/set",
+            "ean": VOLLMILCH,
+            "name": "Milch",
+            "eans": [FETTARM, NUTELLA],
+        }
+    )
+    assert response["success"]
+    assert response["result"]["product"]["eans"] == [FETTARM, NUTELLA]
+    assert response["result"]["product"]["scans"] == 1
+
+    response = await call(
+        {"type": "espeep/set", "ean": VOLLMILCH, "name": "Milch", "eans": ["123"]}
+    )
+    assert response["error"]["code"] == "invalid_ean"
+
+    # A new main barcode keeps the further ones.
+    response = await call(
+        {
+            "type": "espeep/set",
+            "ean": UNKNOWN,
+            "name": "Milch",
+            "previous_ean": VOLLMILCH,
+            "eans": [FETTARM],
+        }
+    )
+    products = get_products(hass)
+    assert list(products) == [UNKNOWN]
+    assert products[UNKNOWN]["eans"] == [FETTARM]
+
+    # Naming without listing joins by name too.
+    response = await call(
+        {"type": "espeep/learn", "ean": NUTELLA, "name": "MILCH", "add_to_list": False}
+    )
+    assert response["result"] == {"ean": NUTELLA, "name": "Milch"}
+    assert get_products(hass)[UNKNOWN]["eans"] == [FETTARM, NUTELLA]
+    assert env.items == ["Fettarme Milch"]
+
+    # Lines with the same name become one product.
+    response = await call(
+        {
+            "type": "espeep/import",
+            "products": {VOLLMILCH: "Milch", "96385074": "Butter"},
+        }
+    )
+    products = get_products(hass)
+    assert sorted(products) == sorted(["96385074", UNKNOWN])
+    assert products[UNKNOWN]["eans"] == [FETTARM, NUTELLA, VOLLMILCH]
+
+    # Deleting the product forgets all of its barcodes.
+    response = await call({"type": "espeep/delete", "ean": UNKNOWN})
+    assert response["result"] == {"removed": True}
+    assert hass.data[DOMAIN].store.get(FETTARM) is None
+
+
+def get_products(hass: HomeAssistant) -> dict[str, Any]:
+    return hass.data[DOMAIN].store.products
+
+
+async def test_old_database_is_read(
+    hass: HomeAssistant, esphome_device, env, hass_storage
+) -> None:
+    hass_storage["espeep.products"] = {
+        "version": 1,
+        "key": "espeep.products",
+        "data": {
+            "products": {
+                NUTELLA: {
+                    "name": "Nutella",
+                    "brand": "",
+                    "quantity": "",
+                    "source": "user",
+                    "created": "2026-01-01T00:00:00+00:00",
+                    "updated": "2026-01-01T00:00:00+00:00",
+                    "scans": 3,
+                    "last_scan": None,
+                }
+            },
+            "unknown": {},
+            "history": [],
+        },
+    }
+    await _setup(hass, esphome_device, env, **{CONF_ONLINE_LOOKUP: False})
+    await hass.services.async_call(
+        DOMAIN, "add_barcode", {"product": NUTELLA, "ean": FETTARM}, blocking=True
+    )
+    await _scan(hass, esphome_device, FETTARM)
+    assert env.items == ["Nutella"]

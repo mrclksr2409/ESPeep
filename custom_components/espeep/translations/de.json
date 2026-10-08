@@ -99,11 +99,25 @@
     },
     "remove_product": {
       "name": "Produkt entfernen",
-      "description": "Vergisst einen Barcode.",
+      "description": "Vergisst ein Produkt mit allen Barcodes. Bei einem seiner weiteren Barcodes wird nur dieser entfernt.",
       "fields": {
         "ean": {
           "name": "Barcode",
           "description": "Der zu vergessende Barcode."
+        }
+      }
+    },
+    "add_barcode": {
+      "name": "Barcode hinzufügen",
+      "description": "Ordnet einem Produkt einen weiteren Barcode zu, z. B. die fettarme Milch zu „Milch“. Ein Scan davon setzt den Namen des Produkts auf die Liste. Ein unter diesem Barcode gespeichertes Produkt wird zusammengeführt.",
+      "fields": {
+        "product": {
+          "name": "Produkt",
+          "description": "Ein beliebiger Barcode des Produkts."
+        },
+        "ean": {
+          "name": "Barcode",
+          "description": "Der hinzuzufügende Barcode."
         }
       }
     },

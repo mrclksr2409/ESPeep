@@ -74,7 +74,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             return
         scanners = loaded_scanners(hass)
         if not scanners:
-            store.async_set(ean, reply)
+            store.async_learn(ean, reply)
             async_named(hass, ean)
             return
         entry_id = get_data(hass).pending.pop(ean, None)

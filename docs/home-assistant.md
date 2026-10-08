@@ -71,15 +71,17 @@ The sidebar entry **ESPeep** is where you manage everything:
 
 - **Unbekannte Barcodes** — barcodes that were scanned but nobody could name.
   Type a name and choose *Speichern + auf Liste*, or look them up online once
-  more.
+  more. Typing the name of a product you already have makes the barcode one
+  more barcode of that product (see below).
 - **Produkt anlegen** — add a barcode by hand. *Online nachschlagen* fills in
   what the databases know, and you shorten the name to what you actually want
-  on the list.
+  on the list. *Weitere Barcodes* adds variants to the product.
 - **Produkte** — the whole database: search, edit, delete, or put a product on
   the list with 🛒 without scanning it.
 - **Letzte Scans** — what happened on the last scans, and on which scanner.
 - **Import / Export** — paste lines like `4008400202037;Milch`, or the contents
-  of the old `ean_mapping.yaml`; export as CSV or JSON.
+  of the old `ean_mapping.yaml`; export as CSV or JSON. Lines with the same
+  name become one product with several barcodes.
 
 Every barcode is check-digit validated, in the panel just as on the device.
 
@@ -106,11 +108,30 @@ use the app or HTTPS access (for example Home Assistant Cloud).
 The button appears once an ESPeep device is set up: a phone scan uses that
 device's list and settings.
 
+### One product, several barcodes
+
+Your list says "Milch" — whether you scanned the whole milk, the low-fat one
+or the other brand. Give a product as many barcodes as you like:
+
+- **Edit the product** (✎) and add the barcodes under *Weitere Barcodes*.
+  A barcode that is a product of its own (say, the low-fat milk the online
+  database already found) is merged in, scans included.
+- **Name an unknown barcode** with the name of an existing product — in the
+  panel, in the phone scanner or in the phone notification. "Milch" joins the
+  barcode to your "Milch" instead of creating a second one.
+- **Rename a product** to the name of another one, and the panel offers to
+  merge it there.
+
+The product table shows them as *+2 weitere*; searching finds any of them.
+Deleting the product forgets all its barcodes, removing a chip in the form
+only that one.
+
 ## How a barcode is resolved
 
 ```
 barcode
-  ├─ in the product database?   -> that name (yours wins, always)
+  ├─ in the product database?   -> that name (yours wins, always),
+  │  (any of a product's barcodes)
   ├─ else: online databases     -> name stored in the database, used from now on
   └─ else: ask you              -> phone notification or HA notification
                                    + listed in the panel under "Unbekannte Barcodes"
@@ -137,7 +158,8 @@ Each scanner gets, on its device page:
 |---|---|
 | `espeep.scan` | Handle a barcode as if it had been scanned. Returns the outcome |
 | `espeep.set_product` | Store a name (and optionally brand and quantity) for a barcode |
-| `espeep.remove_product` | Forget a barcode |
+| `espeep.add_barcode` | Add a further barcode to a product (`product`: any of its barcodes, `ean`: the new one) |
+| `espeep.remove_product` | Forget a product with all its barcodes; given one of its further barcodes, only that one |
 | `espeep.get_products` | Return the product database, unknown barcodes and recent scans |
 
 ## Event for your own automations

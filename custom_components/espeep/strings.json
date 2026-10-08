@@ -99,11 +99,25 @@
     },
     "remove_product": {
       "name": "Remove product",
-      "description": "Forgets a barcode.",
+      "description": "Forgets a product with all its barcodes. Given one of its further barcodes, only that one is removed.",
       "fields": {
         "ean": {
           "name": "Barcode",
           "description": "The barcode to forget."
+        }
+      }
+    },
+    "add_barcode": {
+      "name": "Add barcode",
+      "description": "Makes a barcode one more barcode of a product, e.g. the low-fat milk for \"Milch\". Scanning it puts the product's name on the list. A product stored under that barcode is merged in.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Any barcode of the product."
+        },
+        "ean": {
+          "name": "Barcode",
+          "description": "The barcode to add."
         }
       }
     },

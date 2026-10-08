@@ -87,6 +87,8 @@ def ws_subscribe(
         vol.Optional("quantity", default=""): str,
         # Renaming changes the key; the old one goes away.
         vol.Optional("previous_ean"): str,
+        # Further barcodes of the product. Omitted leaves them as they are.
+        vol.Optional("eans"): [str],
     }
 )
 @callback
@@ -99,12 +101,26 @@ def ws_set(
     if not (name := clean_name(msg["name"])):
         connection.send_error(msg["id"], "invalid_name", "Name darf nicht leer sein")
         return
-    store = get_data(hass).store
-    previous = msg.get("previous_ean")
-    if previous and previous != ean:
-        store.async_remove(previous)
-    product = store.async_set(ean, name, brand=msg["brand"], quantity=msg["quantity"])
-    async_named(hass, ean)
+    eans: list[str] | None = None
+    if "eans" in msg:
+        eans = []
+        for raw in msg["eans"]:
+            if (alias := normalize_ean(raw)) is None:
+                connection.send_error(
+                    msg["id"], "invalid_ean", f"Kein gültiger Barcode: {raw}"
+                )
+                return
+            eans.append(alias)
+    product = get_data(hass).store.async_edit(
+        ean,
+        name,
+        brand=msg["brand"],
+        quantity=msg["quantity"],
+        eans=eans,
+        previous_ean=msg.get("previous_ean"),
+    )
+    for named in (ean, *(eans or ())):
+        async_named(hass, named)
     connection.send_result(msg["id"], {"ean": ean, "product": product})
 
 
@@ -211,17 +227,26 @@ async def ws_add_to_list(
         vol.Required("ean"): str,
         vol.Required("name"): str,
         vol.Optional("entry_id"): str,
+        # False only stores the name, nothing goes on the list.
+        vol.Optional("add_to_list", default=True): bool,
     }
 )
 @websocket_api.async_response
 async def ws_learn(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Name an unknown barcode and put it on the list, like a phone reply."""
+    """Name an unknown barcode and put it on the list, like a phone reply.
+
+    The name of an existing product makes the barcode one more of its own."""
     if (ean := _ean_or_error(connection, msg)) is None:
         return
     if not clean_name(msg["name"]):
         connection.send_error(msg["id"], "invalid_name", "Name darf nicht leer sein")
+        return
+    if not msg["add_to_list"]:
+        product = get_data(hass).store.async_learn(ean, msg["name"])
+        async_named(hass, ean)
+        connection.send_result(msg["id"], {"ean": ean, "name": product["name"]})
         return
     scanners = loaded_scanners(hass)
     entry_id = msg.get("entry_id") or get_data(hass).pending.get(ean)
