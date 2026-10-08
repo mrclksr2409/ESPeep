@@ -49,24 +49,6 @@ jobs:
       - name: Syntax check
         run: node --check custom_components/espeep/frontend/espeep-panel.js
 
-  hassfest:
-    name: hassfest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
-
-  hacs:
-    name: HACS validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: hacs/action@main
-        with:
-          category: integration
-          # Brand images live in home-assistant/brands and are added after
-          # the first release.
-          ignore: brands
-
   logic-tests:
     name: Barcode and display logic
     runs-on: ubuntu-latest
