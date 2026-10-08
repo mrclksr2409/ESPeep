@@ -2,6 +2,10 @@
 
 One database is shared by every ESPeep scanner, so a product named in the
 kitchen is known to the scanner in the cellar too.
+
+A product is stored under its first barcode and can carry further ones in
+`eans`: "Milch" for the whole-milk carton, the low-fat one and the other
+brand. Scanning any of them puts the same name on the list.
 """
 
 from __future__ import annotations
@@ -33,6 +37,8 @@ class Product(TypedDict):
     updated: str
     scans: int
     last_scan: str | None
+    # Further barcodes that stand for the same product.
+    eans: list[str]
 
 
 class Unknown(TypedDict):
@@ -61,6 +67,8 @@ class ProductStore:
         self.products: dict[str, Product] = {}
         self.unknown: dict[str, Unknown] = {}
         self.history: list[HistoryEntry] = []
+        # Further barcode -> the barcode its product is stored under.
+        self._aliases: dict[str, str] = {}
         self._listeners: list[Callable[[], None]] = []
 
     async def async_load(self) -> None:
@@ -69,6 +77,10 @@ class ProductStore:
         self.products = data.get("products", {})
         self.unknown = data.get("unknown", {})
         self.history = data.get("history", [])
+        for ean, product in self.products.items():
+            # Databases from before multi-barcode products have no `eans`.
+            for alias in product.setdefault("eans", []):
+                self._aliases[alias] = ean
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -99,9 +111,24 @@ class ProductStore:
         await self._store.async_save(self._data())
 
     @callback
+    def resolve(self, ean: str) -> str | None:
+        """Return the barcode the product with this barcode is stored under."""
+        return ean if ean in self.products else self._aliases.get(ean)
+
+    @callback
     def get(self, ean: str) -> Product | None:
-        """Return the product for a barcode."""
-        return self.products.get(ean)
+        """Return the product for any of its barcodes."""
+        key = self.resolve(ean)
+        return self.products[key] if key else None
+
+    @callback
+    def find_by_name(self, name: str) -> str | None:
+        """Barcode of a product with exactly this name (ignoring case)."""
+        wanted = clean_name(name).casefold()
+        return next(
+            (ean for ean, p in self.products.items() if p["name"].casefold() == wanted),
+            None,
+        )
 
     @callback
     def async_set(
@@ -122,6 +149,8 @@ class ProductStore:
         self, ean: str, name: str, brand: str, quantity: str, source: str
     ) -> Product:
         now = dt_util.utcnow().isoformat()
+        # A further barcode names the product it belongs to.
+        ean = self.resolve(ean) or ean
         existing = self.products.get(ean)
         product: Product = {
             "name": clean_name(name),
@@ -132,18 +161,108 @@ class ProductStore:
             "updated": now,
             "scans": existing["scans"] if existing else 0,
             "last_scan": existing["last_scan"] if existing else None,
+            "eans": existing["eans"] if existing else [],
         }
         self.products[ean] = product
         self.unknown.pop(ean, None)
         return product
 
     @callback
+    def async_edit(
+        self,
+        ean: str,
+        name: str,
+        *,
+        brand: str = "",
+        quantity: str = "",
+        eans: list[str] | None = None,
+        previous_ean: str | None = None,
+    ) -> Product:
+        """Save a product from the panel: optionally under a new barcode and
+        with a new set of further barcodes. One change, one save."""
+        if previous_ean and previous_ean != ean and previous_ean in self.products:
+            self._drop(ean)
+            self.products[ean] = self.products.pop(previous_ean)
+            for alias in self.products[ean]["eans"]:
+                self._aliases[alias] = ean
+        product = self._set(ean, name, brand, quantity, SOURCE_USER)
+        if eans is not None:
+            key = self.resolve(ean) or ean
+            for alias in list(product["eans"]):
+                if alias not in eans:
+                    self._detach(alias)
+            for alias in eans:
+                self._attach(key, alias)
+        self._changed()
+        return product
+
+    @callback
+    def async_add_ean(self, product_ean: str, ean: str) -> Product | None:
+        """Make `ean` a further barcode of a product.
+
+        A product already stored under `ean` is merged in, together with its
+        own further barcodes and scan count. None if there is no such product.
+        """
+        if (key := self.resolve(product_ean)) is None:
+            return None
+        self._attach(key, ean)
+        self._changed()
+        return self.products[key]
+
+    def _attach(self, key: str, ean: str) -> None:
+        product = self.products[key]
+        if ean == key or ean in product["eans"]:
+            return
+        if ean in self._aliases:
+            self._detach(ean)
+        elif other := self.products.pop(ean, None):
+            product["scans"] += other["scans"]
+            if other["last_scan"] and (product["last_scan"] or "") < other["last_scan"]:
+                product["last_scan"] = other["last_scan"]
+            for alias in other["eans"]:
+                product["eans"].append(alias)
+                self._aliases[alias] = key
+        product["eans"].append(ean)
+        product["updated"] = dt_util.utcnow().isoformat()
+        self._aliases[ean] = key
+        self.unknown.pop(ean, None)
+
+    def _detach(self, alias: str) -> None:
+        if (key := self._aliases.pop(alias, None)) is not None:
+            self.products[key]["eans"].remove(alias)
+            self.products[key]["updated"] = dt_util.utcnow().isoformat()
+
+    def _drop(self, ean: str) -> bool:
+        """Forget a barcode: a further one is detached, a product goes entirely."""
+        if ean in self._aliases:
+            self._detach(ean)
+            return True
+        if (product := self.products.pop(ean, None)) is None:
+            return False
+        for alias in product["eans"]:
+            self._aliases.pop(alias, None)
+        return True
+
+    @callback
     def async_remove(self, ean: str) -> bool:
-        """Forget a product. Returns False if it was not known."""
-        if self.products.pop(ean, None) is None:
+        """Forget a product, or just one further barcode of it.
+
+        Returns False if the barcode was not known."""
+        if not self._drop(ean):
             return False
         self._changed()
         return True
+
+    @callback
+    def async_learn(self, ean: str, name: str) -> Product:
+        """Name a barcode nobody knew. If a product with that name exists, the
+        barcode becomes one more of its barcodes instead of a new product."""
+        owner = self.find_by_name(name)
+        if owner is not None and owner != self.resolve(ean):
+            self._attach(owner, ean)
+            self._changed()
+            return self.products[owner]
+        return self.async_set(ean, name)
 
     @callback
     def async_mark_unknown(self, ean: str) -> None:
@@ -169,7 +288,7 @@ class ProductStore:
     def async_record_scan(self, ean: str, name: str, result: str, device: str) -> None:
         """Count a scan and keep it in the short history."""
         now = dt_util.utcnow().isoformat()
-        if product := self.products.get(ean):
+        if product := self.get(ean):
             product["scans"] += 1
             product["last_scan"] = now
         self.history.insert(
@@ -181,9 +300,17 @@ class ProductStore:
 
     @callback
     def async_import(self, entries: dict[str, str]) -> int:
-        """Bulk-add user names, e.g. from the old ean_mapping.yaml."""
+        """Bulk-add user names, e.g. from the old ean_mapping.yaml.
+
+        Barcodes with the name of a product that is already there become
+        further barcodes of it, so several lines "…;Milch" give one product.
+        """
         for ean, name in entries.items():
-            self._set(ean, name, "", "", SOURCE_USER)
+            owner = self.find_by_name(name)
+            if owner is not None and owner != self.resolve(ean):
+                self._attach(owner, ean)
+            else:
+                self._set(ean, name, "", "", SOURCE_USER)
         if entries:
             self._changed()
         return len(entries)

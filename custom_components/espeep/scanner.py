@@ -32,6 +32,7 @@ from .const import (
     SCANNED_EVENT,
     SIGNAL_SCAN_HANDLED,
     SOURCE_ONLINE,
+    SOURCE_USER,
 )
 from .logic import clean_name, compose_label, node_action_name, normalize_ean
 from .lookup import ProductLookupError, async_lookup
@@ -140,15 +141,17 @@ class EspeepScanner:
         return result
 
     async def async_learn(self, raw_ean: str, name: str) -> ScanResult:
-        """Store a name for a barcode and list it as if it had just been scanned."""
+        """Store a name for a barcode and list it as if it had just been scanned.
+
+        A name that already exists joins the barcode to that product."""
         ean = normalize_ean(raw_ean)
         name = clean_name(name)
         if ean is None or not name:
             return ScanResult(ean=str(raw_ean), result=RESULT_INVALID)
-        self.store.async_set(ean, name)
+        product = self.store.async_learn(ean, name)
         async_named(self.hass, ean)
         async with self._lock:
-            result = await self._async_list(ean, name, "user")
+            result = await self._async_list(ean, product["name"], SOURCE_USER)
         self._async_publish(result)
         return result
 

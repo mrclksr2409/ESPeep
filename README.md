@@ -30,6 +30,8 @@ ESPeep has two halves:
 - **Your names, not the database's.** Open Food Facts calls it "Ja! Haltbare
   Fettarme Milch 1,5% 1l". Your list says "Milch". Rename it once in the
   ESPeep panel and that is what every future scan puts on the list.
+- **One name, many barcodes.** Whole milk, low-fat milk, the other brand —
+  give them all to "Milch" and each scan lists just "Milch".
 - **Unknown products get learned once.** Not in any database? Your phone asks
   what to call it — or you name it in the panel — and the answer is stored.
 - **Managed in Home Assistant, not in YAML.** Add, edit, search, import and
