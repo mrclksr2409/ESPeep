@@ -28,6 +28,24 @@ const validEan = (raw) => {
   return (10 - (sum % 10)) % 10 === Number(code[code.length - 1]) ? code : null;
 };
 
+// ZXing is only needed where the browser has no BarcodeDetector, so it is
+// loaded on first use from the vendor folder next to this file.
+let zxingPromise = null;
+const loadZXing = () => {
+  if (window.ZXing) return Promise.resolve(window.ZXing);
+  zxingPromise ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = new URL("vendor/zxing.min.js", import.meta.url).href;
+    script.onload = () => (window.ZXing ? resolve(window.ZXing) : reject(new Error("ZXing nicht geladen")));
+    script.onerror = () => {
+      zxingPromise = null;
+      reject(new Error("ZXing konnte nicht geladen werden"));
+    };
+    document.head.appendChild(script);
+  });
+  return zxingPromise;
+};
+
 const RESULT_LABELS = {
   added: "Auf die Liste",
   already_listed: "Schon auf der Liste",
@@ -74,6 +92,7 @@ class EspeepPanel extends HTMLElement {
   set route(_route) {}
 
   disconnectedCallback() {
+    this._closeScan();
     if (this._unsub) {
       this._unsub.then((unsub) => unsub()).catch(() => {});
       this._unsub = null;
@@ -120,17 +139,24 @@ class EspeepPanel extends HTMLElement {
     const root = this.shadowRoot;
     // Keep what the user is typing across re-renders triggered by updates.
     const focused = root.activeElement;
-    const focusId = focused && focused.id;
+    const focusId = focused && focused.closest("#page") && focused.id;
     const values = {};
-    root.querySelectorAll("input, textarea, select").forEach((el) => {
+    root.querySelectorAll("#page input, #page textarea, #page select").forEach((el) => {
       if (el.id) values[el.id] = el.value;
     });
 
-    root.innerHTML = `
-      <style>${STYLE}</style>
+    // The scan overlay lives next to the page, not in it: database updates
+    // re-render the page and must not tear down the running camera.
+    if (!this._page) {
+      root.innerHTML = `<style>${STYLE}</style><div id="page"></div><div id="scan-layer"></div>`;
+      this._page = root.getElementById("page");
+    }
+    const canScan = this._data.scanners.length > 0;
+    this._page.innerHTML = `
       <div class="toolbar">
         <ha-menu-button></ha-menu-button>
         <div class="title">ESPeep</div>
+        ${canScan ? `<button class="scan-button" data-action="scan" title="Barcode mit der Kamera scannen">📷 Scannen</button>` : ""}
       </div>
       <div class="content">
         ${this._message ? `<div class="flash ${this._message.error ? "error" : ""}">${esc(this._message.text)}</div>` : ""}
@@ -323,7 +349,7 @@ class EspeepPanel extends HTMLElement {
       this._render();
     });
 
-    root.querySelectorAll("button[data-action]").forEach((button) =>
+    this._page.querySelectorAll("button[data-action]").forEach((button) =>
       button.addEventListener("click", (ev) => this._onAction(ev, button.dataset.action)),
     );
     root.querySelectorAll(".row.unknown input").forEach((input) =>
@@ -433,6 +459,9 @@ class EspeepPanel extends HTMLElement {
         this._flash(`„${result.name}“: ${RESULT_LABELS[result.result] || result.result}`);
         break;
       }
+      case "scan":
+        this._openScan();
+        break;
       case "import":
         await this._import();
         break;
@@ -476,6 +505,387 @@ class EspeepPanel extends HTMLElement {
         (rejected ? `, ${rejected} Zeilen übersprungen (ungültiger Barcode oder Format).` : "."),
       rejected > 0,
     );
+  }
+
+  // --- phone scanner ------------------------------------------------------
+  //
+  // A scan from the phone is handled exactly like one from the device:
+  // espeep/add_to_list runs the same lookup chain, puts the product on the
+  // list and shows it on the chosen ESPeep's display. Unknown barcodes are
+  // named right here in the overlay.
+  //
+  // Decoders, best first: the Companion app's own scanner, the browser's
+  // BarcodeDetector, and the bundled ZXing for everything else (iOS, Firefox).
+
+  _openScan() {
+    if (this._scan) return;
+    const scanners = this._data.scanners;
+    this._scan = {
+      entryId: scanners.some((s) => s.entry_id === this._scanEntry) ? this._scanEntry : scanners[0].entry_id,
+      results: [],
+      lastCode: null,
+      lastAt: 0,
+      busy: false,
+    };
+    if (this._externalBus()) this._startNative();
+    else this._startCamera();
+  }
+
+  _closeScan() {
+    const scan = this._scan;
+    if (!scan) return;
+    this._scan = null;
+    clearTimeout(scan.timer);
+    clearTimeout(scan.resumeTimer);
+    if (scan.stream) scan.stream.getTracks().forEach((track) => track.stop());
+    this._stopNative(scan, true);
+    const layer = this.shadowRoot.getElementById("scan-layer");
+    if (layer) layer.innerHTML = "";
+  }
+
+  // Only while our scan runs, barcode results from the app come to us. The
+  // frontend keeps its own listeners for them private, so we sit in front of
+  // its message handler and pass everything else through untouched.
+  _externalBus() {
+    const bus = this._hass.auth && this._hass.auth.external;
+    return bus && bus.config && bus.config.hasBarCodeScanner && typeof bus.receiveMessage === "function"
+      ? bus
+      : null;
+  }
+
+  _startNative() {
+    const bus = this._externalBus();
+    const scan = this._scan;
+    if (!bus || !scan || scan.native) return;
+    const hadOwn = Object.prototype.hasOwnProperty.call(bus, "receiveMessage");
+    const original = bus.receiveMessage;
+    bus.receiveMessage = (msg) => {
+      if (msg && msg.type === "command" && String(msg.command).startsWith("bar_code/")) {
+        bus.fireMessage({ id: msg.id, type: "result", success: true, result: null });
+        this._onNativeMessage(msg);
+        return;
+      }
+      return original.call(bus, msg);
+    };
+    scan.native = {
+      bus,
+      restore: () => (hadOwn ? (bus.receiveMessage = original) : delete bus.receiveMessage),
+    };
+    bus.fireMessage({
+      type: "bar_code/scan",
+      payload: {
+        title: "ESPeep",
+        description: "Barcode eines Produkts scannen – er landet direkt auf der Einkaufsliste.",
+        alternative_option_label: "Kamera im Browser",
+      },
+    });
+    this._renderScanLayer();
+  }
+
+  _stopNative(scan, closeApp) {
+    if (!scan || !scan.native) return;
+    if (closeApp) scan.native.bus.fireMessage({ type: "bar_code/close" });
+    scan.native.restore();
+    scan.native = null;
+  }
+
+  async _onNativeMessage(msg) {
+    const scan = this._scan;
+    if (!scan) return;
+    if (msg.command === "bar_code/aborted") {
+      this._stopNative(scan, false);
+      if (msg.payload && msg.payload.reason === "alternative_options") {
+        this._startCamera();
+      } else if (!scan.naming) {
+        this._closeScan();
+      } else {
+        this._renderScanLayer();
+      }
+      return;
+    }
+    if (msg.command !== "bar_code/scan_result") return;
+    const code = validEan((msg.payload && msg.payload.rawValue) || "");
+    const notify = (message) => scan.native && scan.native.bus.fireMessage({ type: "bar_code/notify", payload: { message } });
+    if (!code) return notify("Kein EAN-Barcode erkannt.");
+    const result = await this._submitScan(code);
+    if (!result || !this._scan) return;
+    if (result.result === "unknown") {
+      // Naming needs a keyboard: leave the app scanner, ask here.
+      this._stopNative(scan, true);
+      this._renderScanLayer();
+    } else {
+      notify(this._resultText(result));
+    }
+  }
+
+  async _startCamera() {
+    const scan = this._scan;
+    scan.camera = true;
+    this._renderScanLayer();
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return this._scanError(
+        "Die Kamera ist nur über HTTPS erreichbar. Öffne Home Assistant über HTTPS " +
+          "(z. B. Nabu Casa) oder nutze die Home-Assistant-App.",
+      );
+    }
+    try {
+      scan.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+    } catch (err) {
+      return this._scanError(`Kein Zugriff auf die Kamera: ${err.message || err.name || err}`);
+    }
+    if (this._scan !== scan) return scan.stream.getTracks().forEach((track) => track.stop());
+    const video = this.shadowRoot.getElementById("scan-video");
+    video.srcObject = scan.stream;
+    try {
+      await video.play();
+    } catch (_err) {
+      // Autoplay of a muted inline video is allowed; play() can still reject
+      // when the overlay was closed meanwhile.
+    }
+    const track = scan.stream.getVideoTracks()[0];
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    scan.torchTrack = caps.torch ? track : null;
+    try {
+      scan.decode = await this._makeDecoder();
+    } catch (err) {
+      return this._scanError(`Barcode-Erkennung nicht verfügbar: ${err.message || err}`);
+    }
+    if (this._scan !== scan) return;
+    this._renderScanLayer();
+    this._scanLoop();
+  }
+
+  async _makeDecoder() {
+    if ("BarcodeDetector" in window) {
+      const supported = await window.BarcodeDetector.getSupportedFormats().catch(() => []);
+      const formats = ["ean_13", "ean_8", "upc_a", "upc_e"].filter((f) => supported.includes(f));
+      if (formats.length) {
+        const detector = new window.BarcodeDetector({ formats });
+        return async (video) => {
+          const codes = await detector.detect(video);
+          return codes.length ? codes[0].rawValue : null;
+        };
+      }
+    }
+    const ZXing = await loadZXing();
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+    ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    const reader = new ZXing.MultiFormatReader();
+    reader.setHints(hints);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    return async (video) => {
+      if (!video.videoWidth) return null;
+      // A centred band is enough for a 1D barcode and keeps the work small.
+      const width = Math.min(video.videoWidth, 960);
+      const scale = width / video.videoWidth;
+      const band = Math.round(video.videoHeight * 0.5);
+      canvas.width = width;
+      canvas.height = Math.round(band * scale);
+      context.drawImage(video, 0, (video.videoHeight - band) / 2, video.videoWidth, band, 0, 0, canvas.width, canvas.height);
+      try {
+        const bitmap = new ZXing.BinaryBitmap(
+          new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(canvas)),
+        );
+        return reader.decodeWithState(bitmap).getText();
+      } catch (_err) {
+        return null; // nothing found in this frame
+      }
+    };
+  }
+
+  async _scanLoop() {
+    const scan = this._scan;
+    if (!scan || !scan.decode) return;
+    if (!scan.busy && !scan.naming) {
+      const video = this.shadowRoot.getElementById("scan-video");
+      let raw = null;
+      try {
+        raw = video && video.readyState >= 2 ? await scan.decode(video) : null;
+      } catch (_err) {
+        raw = null;
+      }
+      const code = raw && validEan(raw);
+      if (code && this._scan === scan) await this._submitScan(code);
+    }
+    if (this._scan === scan) scan.timer = setTimeout(() => this._scanLoop(), 150);
+  }
+
+  async _submitScan(code) {
+    const scan = this._scan;
+    const now = Date.now();
+    // The same product stays in view for a while: one scan, not ten.
+    if (scan.busy || (code === scan.lastCode && now - scan.lastAt < 4000)) return null;
+    scan.busy = true;
+    scan.lastCode = code;
+    scan.lastAt = now;
+    scan.error = null;
+    if (navigator.vibrate) navigator.vibrate(80);
+    scan.pending = code;
+    this._renderScanLayer();
+    let result;
+    try {
+      result = await this._hass.callWS({ type: "espeep/add_to_list", ean: code, entry_id: scan.entryId });
+    } catch (err) {
+      result = null;
+      scan.error = err.message || String(err);
+    }
+    scan.pending = null;
+    scan.busy = false;
+    if (this._scan !== scan) return null;
+    if (result) {
+      scan.results.unshift(result);
+      scan.results.length = Math.min(scan.results.length, 5);
+      if (result.result === "unknown") scan.naming = result.ean;
+    }
+    this._renderScanLayer();
+    if (scan.naming) this.shadowRoot.getElementById("scan-name").focus();
+    return result;
+  }
+
+  async _learnScanned() {
+    const scan = this._scan;
+    const input = this.shadowRoot.getElementById("scan-name");
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    try {
+      const result = await this._hass.callWS({ type: "espeep/learn", ean: scan.naming, name, entry_id: scan.entryId });
+      scan.results[0] = result;
+      scan.naming = null;
+      scan.error = null;
+    } catch (err) {
+      scan.error = err.message || String(err);
+    }
+    this._afterNaming();
+  }
+
+  _afterNaming() {
+    const scan = this._scan;
+    if (!scan) return;
+    // Back to where the scan came from: the app scanner or the camera.
+    if (!scan.naming && !scan.camera && this._externalBus()) this._startNative();
+    else this._renderScanLayer();
+  }
+
+  _scanError(text) {
+    if (!this._scan) return;
+    this._scan.error = text;
+    this._scan.fatal = true;
+    this._renderScanLayer();
+  }
+
+  _resultText(result) {
+    return `${result.name ? `„${result.name}“` : result.ean}: ${RESULT_LABELS[result.result] || result.result}`;
+  }
+
+  _renderScanLayer() {
+    const layer = this.shadowRoot.getElementById("scan-layer");
+    const scan = this._scan;
+    if (!scan) return (layer.innerHTML = "");
+    const scanners = this._data.scanners;
+
+    if (!layer.firstElementChild) {
+      layer.innerHTML = `<div class="scan-overlay">
+        <div class="scan-top">
+          <div class="scan-title">Barcode scannen</div>
+          <button id="scan-torch" class="scan-icon" title="Licht" hidden>🔦</button>
+          <button id="scan-close" class="scan-icon" title="Schließen">✕</button>
+        </div>
+        <div class="scan-view" hidden>
+          <video id="scan-video" playsinline muted autoplay></video>
+          <div class="scan-frame"></div>
+        </div>
+        <div class="scan-panel"></div>
+      </div>`;
+      layer.querySelector("#scan-close").addEventListener("click", () => this._closeScan());
+      layer.querySelector("#scan-torch").addEventListener("click", () => {
+        const track = this._scan && this._scan.torchTrack;
+        if (!track) return;
+        this._scan.torch = !this._scan.torch;
+        track.applyConstraints({ advanced: [{ torch: this._scan.torch }] }).catch(() => {});
+      });
+    }
+    layer.querySelector(".scan-view").hidden = !scan.camera || scan.fatal;
+    layer.querySelector("#scan-torch").hidden = !scan.torchTrack;
+
+    const latest = scan.results[0];
+    let status;
+    if (scan.error) {
+      status = `<div class="scan-status error">${esc(scan.error)}</div>`;
+    } else if (scan.pending) {
+      status = `<div class="scan-status">${esc(scan.pending)} …</div>`;
+    } else if (scan.naming) {
+      status = `<div class="scan-status warn">
+        <b class="mono">${esc(scan.naming)}</b> kennt keine Datenbank. Wie soll er auf der Liste heißen?
+        <input id="scan-name" placeholder="Name, z. B. Milch" />
+        <div class="actions">
+          <button class="primary" id="scan-learn">Speichern + auf Liste</button>
+          <button id="scan-skip">Später</button>
+        </div>
+      </div>`;
+    } else if (latest) {
+      status = `<div class="scan-status ${latest.result === "added" ? "ok" : ""}">${esc(this._resultText(latest))}</div>`;
+    } else if (scan.native) {
+      status = `<div class="scan-status">Der Scanner der Home-Assistant-App ist geöffnet.</div>`;
+    } else {
+      status = `<div class="scan-status">${scan.decode ? "Barcode in den Rahmen halten." : "Kamera wird gestartet …"}</div>`;
+    }
+
+    const typing = this.shadowRoot.activeElement && this.shadowRoot.activeElement.id === "scan-name";
+    const typed = typing ? this.shadowRoot.getElementById("scan-name").value : null;
+    layer.querySelector(".scan-panel").innerHTML = `
+      ${
+        scanners.length > 1
+          ? `<label>ESPeep (Einkaufsliste und Display)
+          <select id="scan-entry">${scanners
+            .map((s) => `<option value="${esc(s.entry_id)}" ${s.entry_id === scan.entryId ? "selected" : ""}>${esc(s.name)}</option>`)
+            .join("")}</select></label>`
+          : ""
+      }
+      ${status}
+      ${
+        scan.results.length > (scan.naming ? 0 : 1)
+          ? `<ul class="scan-log">${scan.results
+              .slice(scan.naming ? 0 : 1)
+              .map((r) => `<li><span class="tag r-${esc(r.result)}">${esc(RESULT_LABELS[r.result] || r.result)}</span> ${esc(r.name || r.ean)}</li>`)
+              .join("")}</ul>`
+          : ""
+      }
+      ${!scan.camera && !scan.native && !scan.naming ? `<div class="actions"><button id="scan-again" class="primary">Weiter scannen</button></div>` : ""}`;
+
+    const panel = layer.querySelector(".scan-panel");
+    const select = panel.querySelector("#scan-entry");
+    if (select)
+      select.addEventListener("change", () => {
+        scan.entryId = this._scanEntry = select.value;
+      });
+    const nameInput = panel.querySelector("#scan-name");
+    if (nameInput) {
+      if (typed !== null) {
+        nameInput.value = typed;
+        nameInput.focus();
+      }
+      nameInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") this._learnScanned();
+      });
+      panel.querySelector("#scan-learn").addEventListener("click", () => this._learnScanned());
+      panel.querySelector("#scan-skip").addEventListener("click", () => {
+        // It stays under "Unbekannte Barcodes" and in the notification.
+        scan.naming = null;
+        this._afterNaming();
+      });
+    }
+    const again = panel.querySelector("#scan-again");
+    if (again) again.addEventListener("click", () => this._startNative());
   }
 
   _download(filename, content, type) {
@@ -558,6 +968,49 @@ const STYLE = `
   .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; background: rgba(76,175,80,.2); }
   .flash.error { background: rgba(244,67,54,.2); }
   code { font-family: var(--code-font-family, monospace); }
+  .toolbar .scan-button {
+    margin-left: auto; color: inherit; border-color: currentColor;
+    background: rgba(255,255,255,.12); padding: 6px 14px;
+  }
+  .scan-overlay {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    background: var(--primary-background-color);
+  }
+  .scan-top {
+    display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px;
+    background: var(--app-header-background-color, var(--primary-color));
+    color: var(--app-header-text-color, var(--text-primary-color, #fff));
+  }
+  .scan-title { font-size: 20px; flex: 1; }
+  .scan-icon { color: inherit; border: none; font-size: 20px; padding: 6px 10px; }
+  .scan-icon[hidden] { display: none; }
+  .scan-view { position: relative; flex: 1; min-height: 0; background: #000; overflow: hidden; }
+  .scan-view[hidden] { display: none; }
+  .scan-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .scan-frame {
+    position: absolute; left: 10%; right: 10%; top: 35%; bottom: 35%;
+    border: 3px solid rgba(255,255,255,.85); border-radius: 12px;
+    box-shadow: 0 0 0 100vmax rgba(0,0,0,.35);
+  }
+  .scan-panel {
+    padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    max-height: 50vh; overflow-y: auto; background: var(--card-background-color, #fff);
+  }
+  .scan-overlay .scan-view[hidden] + .scan-panel { flex: 1; max-height: none; }
+  .scan-panel select {
+    font: inherit; color: var(--primary-text-color); padding: 8px 10px; border-radius: 6px;
+    background: var(--input-fill-color, var(--secondary-background-color)); border: 1px solid var(--divider-color);
+  }
+  .scan-status {
+    padding: 12px 14px; border-radius: 8px; font-size: 16px;
+    background: var(--secondary-background-color); display: flex; flex-direction: column; gap: 10px;
+  }
+  .scan-status.ok { background: rgba(76,175,80,.2); }
+  .scan-status.warn { background: rgba(255,152,0,.2); }
+  .scan-status.error { background: rgba(244,67,54,.2); }
+  .scan-status .actions { margin-top: 0; }
+  .scan-log { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  .scan-log li { padding: 4px 0; border-bottom: 1px solid var(--divider-color); }
   @media (max-width: 700px) {
     .wide { display: none; }
     .row.unknown { grid-template-columns: 1fr; }

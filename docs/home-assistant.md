@@ -83,6 +83,29 @@ The sidebar entry **ESPeep** is where you manage everything:
 
 Every barcode is check-digit validated, in the panel just as on the device.
 
+### Scanning with the phone
+
+**📷 Scannen** in the panel's title bar turns your phone into a second
+scanner. A phone scan is handled exactly like one from the device: it goes
+straight onto the shopping list, the ESPeep's display shows what was listed
+and *Letzte Scans* records it under that ESPeep. With more than one ESPeep,
+pick in the scanner which one's list and display to use. An unknown barcode
+asks for its name right in the scanner; *Später* leaves it under *Unbekannte
+Barcodes* and in the notification. Keep scanning, the scanner stays open.
+
+- **Home Assistant app** (Android, iOS): opens the app's own barcode scanner.
+  *Kamera im Browser* switches to the camera view below instead.
+- **Browser**: a camera view in the panel. Chrome on Android uses the
+  browser's built-in barcode detection; Safari, Firefox and desktop browsers
+  use the bundled ZXing decoder (`frontend/vendor/`, Apache-2.0).
+
+Browsers only grant camera access to pages served over **HTTPS** (or
+`localhost`). If you open Home Assistant as `http://homeassistant.local:8123`,
+use the app or HTTPS access (for example Home Assistant Cloud).
+
+The button appears once an ESPeep device is set up: a phone scan uses that
+device's list and settings.
+
 ## How a barcode is resolved
 
 ```
