@@ -34,6 +34,9 @@ ESPeep has two halves:
   what to call it — or you name it in the panel — and the answer is stored.
 - **Managed in Home Assistant, not in YAML.** Add, edit, search, import and
   export barcodes in the sidebar panel. No files to edit, no restarts.
+- **Your phone is a scanner too.** *📷 Scannen* in the panel opens the
+  camera (or the Home Assistant app's scanner) and lists products just like
+  the device does — handy away from the kitchen.
 - **Misreads do not reach your list.** Every barcode is check-digit validated
   on the device.
 - **No duplicates.** Scanning the same product on two shopping trips does not
