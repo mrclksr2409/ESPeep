@@ -9,7 +9,8 @@
           "todo_entity": "Shopping list",
           "notify_service": "Phone to ask for unknown products",
           "online_lookup": "Look up unknown barcodes online",
-          "include_brand": "Put the brand in front of the name",
+          "title_template": "Title on the list",
+          "description_template": "Description",
           "language": "Product name language"
         },
         "data_description": {
@@ -17,13 +18,15 @@
           "todo_entity": "Any to-do list works: Local To-do, Shopping List, Bring!, Mealie, …",
           "notify_service": "A companion app notify service. You can type the name of a product nobody knows directly into the notification. Leave empty to get a Home Assistant notification instead.",
           "online_lookup": "Ask Open Food Facts, Open Products Facts and Open Beauty Facts. Results are cached in the product database, and your own names always win.",
-          "include_brand": "\"Ferrero Nutella\" instead of \"Nutella\". Only applies to names from the online databases.",
+          "title_template": "What the entry is called. Placeholders: {placeholders}. Text in [ ] is left out when a placeholder in it is empty, e.g. \"{name}[ ({quantity})]\". The brand only appears for names from the online databases.",
+          "description_template": "Extra text for the entry, one line per piece of information; lines whose placeholders are all empty are left out. Same placeholders as the title. Empty for no description. Not every list can store one (the plain Shopping List cannot).",
           "language": "Two-letter code like \"de\". Empty uses the Home Assistant language."
         }
       }
     },
     "error": {
-      "device_not_found": "That device no longer exists."
+      "device_not_found": "That device no longer exists.",
+      "unknown_placeholder": "Unknown placeholder. Available: {placeholders}."
     },
     "abort": {
       "already_configured": "This device is already set up as an ESPeep scanner."
@@ -38,14 +41,20 @@
           "todo_entity": "Shopping list",
           "notify_service": "Phone to ask for unknown products",
           "online_lookup": "Look up unknown barcodes online",
-          "include_brand": "Put the brand in front of the name",
+          "title_template": "Title on the list",
+          "description_template": "Description",
           "language": "Product name language"
         },
         "data_description": {
           "notify_service": "Leave empty to get a Home Assistant notification instead.",
+          "title_template": "What the entry is called. Placeholders: {placeholders}. Text in [ ] is left out when a placeholder in it is empty, e.g. \"{name}[ ({quantity})]\". The brand only appears for names from the online databases.",
+          "description_template": "Extra text for the entry, one line per piece of information; lines whose placeholders are all empty are left out. Same placeholders as the title. Empty for no description. Not every list can store one (the plain Shopping List cannot).",
           "language": "Two-letter code like \"de\". Empty uses the Home Assistant language."
         }
       }
+    },
+    "error": {
+      "unknown_placeholder": "Unknown placeholder. Available: {placeholders}."
     }
   },
   "entity": {

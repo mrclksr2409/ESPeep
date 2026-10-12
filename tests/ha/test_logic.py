@@ -4,10 +4,13 @@ import pytest
 
 from custom_components.espeep.logic import (
     clean_name,
-    compose_label,
+    compose_entry,
     node_action_name,
     normalize_ean,
     parse_off_product,
+    render_template,
+    title_template,
+    unknown_placeholders,
 )
 
 
@@ -38,16 +41,62 @@ def test_clean_name():
 
 
 @pytest.mark.parametrize(
-    ("name", "brand", "include", "expected"),
+    ("name", "brand", "own_name", "expected"),
     [
-        ("Nutella", "Ferrero", True, "Ferrero Nutella"),
-        ("Nutella", "Ferrero", False, "Nutella"),
-        ("Ferrero Nutella", "Ferrero", True, "Ferrero Nutella"),
-        ("Milch", "", True, "Milch"),
+        ("Nutella", "Ferrero", False, "Ferrero Nutella"),
+        ("Ferrero Nutella", "Ferrero", False, "Ferrero Nutella"),
+        ("Milch", "", False, "Milch"),
+        # Your own name stays as you wrote it.
+        ("Nutella", "Ferrero", True, "Nutella"),
     ],
 )
-def test_compose_label(name, brand, include, expected):
-    assert compose_label(name, brand, include) == expected
+def test_compose_entry_title(name, brand, own_name, expected):
+    title, _ = compose_entry(
+        "{brand} {name}", "", name=name, brand=brand, own_name=own_name
+    )
+    assert title == expected
+
+
+def test_compose_entry_description():
+    title, description = compose_entry(
+        "{name}[ ({quantity})]",
+        "Marke: {brand}\nMenge: {quantity}\nEAN {ean}\nGescannt: {device}",
+        name="Nutella",
+        brand="Ferrero",
+        ean="3017620422003",
+        device="Küche",
+    )
+    assert title == "Nutella"
+    assert description == "Marke: Ferrero\nEAN 3017620422003\nGescannt: Küche"
+
+
+def test_compose_entry_falls_back_to_name():
+    assert compose_entry("{brand}", "", name="Milch") == ("Milch", "")
+
+
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("{name}[ ({quantity})]", "Milch (1 l)"),
+        ("[{brand} – ]{name}", "Milch"),
+        ("{brand} {name}", "Milch"),
+        ("Menge: {quantity}\nMarke: {brand}\n\nfest", "Menge: 1 l\nfest"),
+        ("{nope}", "{nope}"),
+    ],
+)
+def test_render_template(template, expected):
+    values = {"name": "Milch", "brand": "", "quantity": "1 l"}
+    assert render_template(template, values) == expected
+
+
+def test_unknown_placeholders():
+    assert unknown_placeholders("{name} {marke} {ean} {x}") == ["marke", "x"]
+
+
+def test_title_template_from_old_options():
+    assert title_template({}) == "{brand} {name}"
+    assert title_template({"include_brand": False}) == "{name}"
+    assert title_template({"title_template": "{name}"}) == "{name}"
 
 
 def test_parse_off_product_prefers_language():

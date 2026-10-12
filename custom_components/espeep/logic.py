@@ -6,7 +6,14 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from .const import MAX_NAME_LENGTH
+from .const import (
+    CONF_INCLUDE_BRAND,
+    CONF_TITLE_TEMPLATE,
+    DEFAULT_INCLUDE_BRAND,
+    DEFAULT_TITLE_TEMPLATE,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_NAME_LENGTH,
+)
 
 VALID_LENGTHS = (8, 12, 13, 14)
 
@@ -56,13 +63,92 @@ def first_brand(brands: str) -> str:
     return clean_name(brands.split(",")[0]) if brands else ""
 
 
-def compose_label(name: str, brand: str, include_brand: bool) -> str:
-    """Build the text that goes on the shopping list."""
+# What a list entry can be built from. {brand} and {quantity} are only known
+# for products from the online databases, or when you entered them yourself.
+PLACEHOLDERS = ("name", "brand", "quantity", "ean", "device")
+
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+_OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
+
+
+def unknown_placeholders(template: str) -> list[str]:
+    """Placeholders in a template that ESPeep cannot fill."""
+    return sorted(
+        {key for key in _PLACEHOLDER.findall(template) if key not in PLACEHOLDERS}
+    )
+
+
+def render_template(template: str, values: dict[str, str]) -> str:
+    """Fill a list entry template.
+
+    - `{name}` and friends are replaced by the product's values.
+    - `[ … ]` is left out entirely when a placeholder in it is empty, so
+      `{name}[ ({quantity})]` gives "Milch (1 l)" or just "Milch".
+    - A line whose placeholders are all empty is left out, so a line
+      "Menge: {quantity}" disappears for products without a quantity.
+    """
+
+    def fill(text: str) -> str:
+        return _PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), text)
+
+    def optional(match: re.Match[str]) -> str:
+        keys = _PLACEHOLDER.findall(match[1])
+        if any(key in values and not values[key] for key in keys):
+            return ""
+        return fill(match[1])
+
+    lines = []
+    for line in template.splitlines():
+        keys = _PLACEHOLDER.findall(line)
+        if keys and all(key in values and not values[key] for key in keys):
+            continue
+        text = _WHITESPACE.sub(" ", fill(_OPTIONAL.sub(optional, line))).strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+def title_template(options: dict[str, Any]) -> str:
+    """The title template, also for entries from before it was configurable."""
+    if template := options.get(CONF_TITLE_TEMPLATE):
+        return str(template)
+    if not options.get(CONF_INCLUDE_BRAND, DEFAULT_INCLUDE_BRAND):
+        return "{name}"
+    return DEFAULT_TITLE_TEMPLATE
+
+
+def compose_entry(
+    title: str,
+    description: str,
+    *,
+    name: str,
+    brand: str = "",
+    quantity: str = "",
+    ean: str = "",
+    device: str = "",
+    own_name: bool = False,
+) -> tuple[str, str]:
+    """Build title and description of the list entry for a product."""
     name = clean_name(name)
     brand = clean_name(brand)
-    if include_brand and brand and brand.casefold() not in name.casefold():
-        return clean_name(f"{brand} {name}")
-    return name
+    values = {
+        "name": name,
+        "brand": brand,
+        "quantity": clean_name(quantity),
+        "ean": ean,
+        "device": clean_name(device),
+    }
+    # The title never says the brand twice, and a name you gave a product is
+    # what you want to read on the list, not the brand in front of it.
+    title_values = values
+    if own_name or brand.casefold() in name.casefold():
+        title_values = {**values, "brand": ""}
+    text = clean_name(render_template(title, title_values)) or name
+    details = "\n".join(
+        _CONTROL_CHARS.sub("", line)
+        for line in render_template(description, values).splitlines()
+    )
+    return text, details[:MAX_DESCRIPTION_LENGTH].strip()
 
 
 def parse_off_product(
