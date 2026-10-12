@@ -134,7 +134,7 @@ async def test_config_flow(hass: HomeAssistant, esphome_device, env) -> None:
             CONF_TODO_ENTITY: TODO,
             CONF_NOTIFY_SERVICE: "notify.mobile_app_phone",
             CONF_ONLINE_LOOKUP: True,
-            "include_brand": True,
+            "title_template": "{brand} {name}",
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -154,7 +154,7 @@ async def test_config_flow(hass: HomeAssistant, esphome_device, env) -> None:
             CONF_DEVICE_ID: esphome_device.id,
             CONF_TODO_ENTITY: TODO,
             CONF_ONLINE_LOOKUP: True,
-            "include_brand": True,
+            "title_template": "{brand} {name}",
         },
     )
     assert result["type"] is FlowResultType.ABORT
@@ -162,15 +162,29 @@ async def test_config_flow(hass: HomeAssistant, esphome_device, env) -> None:
 
 
 async def test_options_flow(hass: HomeAssistant, esphome_device, env) -> None:
-    entry = await _setup(hass, esphome_device, env)
+    entry = await _setup(hass, esphome_device, env, include_brand=False)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
+
+    # Placeholders ESPeep does not know are refused.
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
             CONF_TODO_ENTITY: "todo.other",
             CONF_ONLINE_LOOKUP: False,
-            "include_brand": False,
+            "title_template": "{marke} {name}",
+        },
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"title_template": "unknown_placeholder"}
+
+    # An emptied description stays empty instead of falling back to the default.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_TODO_ENTITY: "todo.other",
+            CONF_ONLINE_LOOKUP: False,
+            "title_template": "{name}",
             "language": "",
         },
     )
@@ -179,7 +193,8 @@ async def test_options_flow(hass: HomeAssistant, esphome_device, env) -> None:
     assert entry.options == {
         CONF_TODO_ENTITY: "todo.other",
         CONF_ONLINE_LOOKUP: False,
-        "include_brand": False,
+        "title_template": "{name}",
+        "description_template": "",
     }
 
 
@@ -244,6 +259,49 @@ async def test_description_when_supported(
     )
     await _scan(hass, esphome_device, NUTELLA)
     assert env.added[0]["description"] == f"EAN {NUTELLA}"
+
+
+async def test_custom_title_and_description(
+    hass: HomeAssistant, esphome_device, env, aioclient_mock
+) -> None:
+    aioclient_mock.get(
+        OFF_URL.format(NUTELLA),
+        json={
+            "product": {
+                "product_name_de": "Nutella",
+                "brands": "Ferrero",
+                "quantity": "450 g",
+            }
+        },
+    )
+    hass.states.async_set(TODO, "0", {"supported_features": 64})
+    await _setup(
+        hass,
+        esphome_device,
+        env,
+        language="de",
+        title_template="{name}[ ({quantity})]",
+        description_template="Marke: {brand}\nEAN {ean}",
+    )
+    await _scan(hass, esphome_device, NUTELLA)
+    assert env.added[0]["item"] == "Nutella (450 g)"
+    assert env.added[0]["description"] == f"Marke: Ferrero\nEAN {NUTELLA}"
+    assert env.display[-1]["title"] == "Nutella (450 g)"
+
+
+async def test_no_description(hass: HomeAssistant, esphome_device, env) -> None:
+    hass.states.async_set(TODO, "0", {"supported_features": 64})
+    await _setup(
+        hass,
+        esphome_device,
+        env,
+        **{CONF_ONLINE_LOOKUP: False, "description_template": ""},
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_product", {"ean": NUTELLA, "name": "Nutella"}, blocking=True
+    )
+    await _scan(hass, esphome_device, NUTELLA)
+    assert "description" not in env.added[0]
 
 
 async def test_unknown_asks_phone_and_learns(

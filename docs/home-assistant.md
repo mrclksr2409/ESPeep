@@ -44,13 +44,46 @@ Devices & Services → ESPHome*, continue here.
 | Shopping list | Any `todo.` entity |
 | Phone | Optional. A `notify.mobile_app_…` service: unknown barcodes then arrive as a notification you can type the name into. Without it, you get a Home Assistant notification instead |
 | Look up unknown barcodes online | On by default. Off means only the product database is used |
-| Put the brand in front of the name | "Ferrero Nutella" instead of "Nutella", for names from the online databases |
+| Title on the list | What the list entry is called. Default `{brand} {name}`: "Ferrero Nutella" instead of "Nutella". See [List entries](#list-entries) |
+| Description | Extra text for the list entry. Default `EAN {ean}`. Empty for none |
 | Product name language | Empty uses Home Assistant's language |
 
 Several scanners? Add the integration once per device. They share one product
 database, so a product named in the kitchen is known in the cellar too.
 
 All settings can be changed later under *Configure*.
+
+### List entries
+
+*Title on the list* and *Description* decide which information goes into which
+field of the to-do item. Both are templates with these placeholders:
+
+| Placeholder | Becomes |
+|---|---|
+| `{name}` | The product name — yours, or the one from the online database |
+| `{brand}` | The brand, e.g. "Ferrero" |
+| `{quantity}` | The package size, e.g. "450 g" |
+| `{ean}` | The barcode that was scanned |
+| `{device}` | The scanner it was scanned with |
+
+- Text in `[ ]` is left out when a placeholder in it is empty:
+  `{name}[ ({quantity})]` gives "Nutella (450 g)", or just "Milch".
+- In the description, a line whose placeholders are all empty is left out, so
+  `Menge: {quantity}` only appears when the quantity is known.
+- In the title, `{brand}` stays empty for names you gave yourself and when the
+  name already contains the brand. Your "Milch" stays "Milch".
+- A product is "already on the list" when an open item has the same title.
+
+Some examples:
+
+| Title | Description | List entry |
+|---|---|---|
+| `{brand} {name}` | `EAN {ean}` | **Ferrero Nutella** — EAN 3017620422003 (default) |
+| `{name}` | `{brand}`<br>`{quantity}` | **Nutella** — Ferrero / 450 g |
+| `{name}[ ({quantity})]` | *(empty)* | **Nutella (450 g)** |
+
+Not every list can store a description: the plain *Shopping List* cannot, and
+ESPeep then only sets the title. Local To-do, Bring! and others can.
 
 ## 4. Try it
 

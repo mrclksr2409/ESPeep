@@ -16,13 +16,13 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
+    CONF_DESCRIPTION_TEMPLATE,
     CONF_DEVICE_ID,
-    CONF_INCLUDE_BRAND,
     CONF_LANGUAGE,
     CONF_NOTIFY_SERVICE,
     CONF_ONLINE_LOOKUP,
     CONF_TODO_ENTITY,
-    DEFAULT_INCLUDE_BRAND,
+    DEFAULT_DESCRIPTION_TEMPLATE,
     DEFAULT_ONLINE_LOOKUP,
     DEVICE_ACTION,
     DOMAIN,
@@ -34,10 +34,16 @@ from .const import (
     SOURCE_ONLINE,
     SOURCE_USER,
 )
-from .logic import clean_name, compose_label, node_action_name, normalize_ean
+from .logic import (
+    clean_name,
+    compose_entry,
+    node_action_name,
+    normalize_ean,
+    title_template,
+)
 from .lookup import ProductLookupError, async_lookup
 from .runtime import async_named, notification_id
-from .store import ProductStore
+from .store import Product, ProductStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -151,7 +157,7 @@ class EspeepScanner:
         product = self.store.async_learn(ean, name)
         async_named(self.hass, ean)
         async with self._lock:
-            result = await self._async_list(ean, product["name"], SOURCE_USER)
+            result = await self._async_list(ean, product, SOURCE_USER)
         self._async_publish(result)
         return result
 
@@ -163,17 +169,11 @@ class EspeepScanner:
             return ScanResult(ean=raw_ean, result=RESULT_INVALID)
 
         options = self.options
-        include_brand = options.get(CONF_INCLUDE_BRAND, DEFAULT_INCLUDE_BRAND)
 
         # 1. Our own table. It holds everything you named and every product an
         #    online database resolved before, so known barcodes never leave HA.
         if product := self.store.get(ean):
-            label = (
-                product["name"]
-                if product["source"] != SOURCE_ONLINE
-                else compose_label(product["name"], product["brand"], include_brand)
-            )
-            return await self._async_list(ean, label, product["source"])
+            return await self._async_list(ean, product, product["source"])
 
         # 2. Online databases.
         if options.get(CONF_ONLINE_LOOKUP, DEFAULT_ONLINE_LOOKUP):
@@ -186,15 +186,14 @@ class EspeepScanner:
                 )
                 return ScanResult(ean=ean, result=RESULT_LOOKUP_FAILED)
             if info is not None:
-                self.store.async_set(
+                product = self.store.async_set(
                     ean,
                     info.name,
                     brand=info.brand,
                     quantity=info.quantity,
                     source=SOURCE_ONLINE,
                 )
-                label = compose_label(info.name, info.brand, include_brand)
-                return await self._async_list(ean, label, SOURCE_ONLINE)
+                return await self._async_list(ean, product, SOURCE_ONLINE)
 
         # 3. Nobody knows it: remember it and ask.
         self.store.async_mark_unknown(ean)
@@ -203,13 +202,28 @@ class EspeepScanner:
         await self._async_show("unknown", "In HA benennen", ean)
         return ScanResult(ean=ean, result=RESULT_UNKNOWN)
 
-    async def _async_list(self, ean: str, label: str, source: str) -> ScanResult:
+    def list_entry(self, ean: str, product: Product) -> tuple[str, str]:
+        """Title and description of the list entry, as set in the options."""
+        options = self.options
+        return compose_entry(
+            title_template(options),
+            options.get(CONF_DESCRIPTION_TEMPLATE, DEFAULT_DESCRIPTION_TEMPLATE),
+            name=product["name"],
+            brand=product["brand"],
+            quantity=product["quantity"],
+            ean=ean,
+            device=self.device_name,
+            own_name=product["source"] != SOURCE_ONLINE,
+        )
+
+    async def _async_list(self, ean: str, product: Product, source: str) -> ScanResult:
+        label, description = self.list_entry(ean, product)
         if not self.add_to_list:
             result = RESULT_RECOGNISED
             detail = "Erkannt"
         else:
             try:
-                added = await self._async_add_to_list(label, ean)
+                added = await self._async_add_to_list(label, description)
             except HomeAssistantError as err:
                 _LOGGER.error("Could not add %s to the shopping list: %s", label, err)
                 await self._async_show("error", "Liste nicht erreichbar", label)
@@ -224,7 +238,7 @@ class EspeepScanner:
         await self._async_show("ok", label, detail)
         return ScanResult(ean, result, label, source)
 
-    async def _async_add_to_list(self, label: str, ean: str) -> bool:
+    async def _async_add_to_list(self, label: str, description: str) -> bool:
         """Add unless an open item with the same name exists. True if added."""
         entity_id = self.options.get(CONF_TODO_ENTITY)
         if not entity_id:
@@ -248,8 +262,8 @@ class EspeepScanner:
         # cannot), and asking for one there fails the whole call.
         state = self.hass.states.get(entity_id)
         features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0) if state else 0
-        if features & TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM:
-            data["description"] = f"EAN {ean}"
+        if description and features & TodoListEntityFeature.SET_DESCRIPTION_ON_ITEM:
+            data["description"] = description
 
         await self.hass.services.async_call(
             "todo",

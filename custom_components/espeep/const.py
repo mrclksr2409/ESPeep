@@ -26,11 +26,16 @@ CONF_DEVICE_ID: Final = "device_id"
 CONF_TODO_ENTITY: Final = "todo_entity"
 CONF_NOTIFY_SERVICE: Final = "notify_service"
 CONF_ONLINE_LOOKUP: Final = "online_lookup"
+# Superseded by CONF_TITLE_TEMPLATE, still read for entries set up before.
 CONF_INCLUDE_BRAND: Final = "include_brand"
+CONF_TITLE_TEMPLATE: Final = "title_template"
+CONF_DESCRIPTION_TEMPLATE: Final = "description_template"
 CONF_LANGUAGE: Final = "language"
 
 DEFAULT_ONLINE_LOOKUP: Final = True
 DEFAULT_INCLUDE_BRAND: Final = True
+DEFAULT_TITLE_TEMPLATE: Final = "{brand} {name}"
+DEFAULT_DESCRIPTION_TEMPLATE: Final = "EAN {ean}"
 
 SOURCE_USER: Final = "user"
 SOURCE_ONLINE: Final = "online"
@@ -45,4 +50,5 @@ SIGNAL_STORE_UPDATED: Final = f"{DOMAIN}_store_updated"
 SIGNAL_SCAN_HANDLED: Final = f"{DOMAIN}_scan_handled_{{}}"
 
 MAX_NAME_LENGTH: Final = 100
+MAX_DESCRIPTION_LENGTH: Final = 1000
 HISTORY_LENGTH: Final = 50

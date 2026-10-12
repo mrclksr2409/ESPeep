@@ -9,7 +9,8 @@
           "todo_entity": "Einkaufsliste",
           "notify_service": "Handy für Rückfragen zu unbekannten Produkten",
           "online_lookup": "Unbekannte Barcodes online nachschlagen",
-          "include_brand": "Marke vor den Namen setzen",
+          "title_template": "Titel auf der Liste",
+          "description_template": "Beschreibung",
           "language": "Sprache der Produktnamen"
         },
         "data_description": {
@@ -17,13 +18,15 @@
           "todo_entity": "Jede To-do-Liste funktioniert: Lokale To-do-Liste, Einkaufsliste, Bring!, Mealie, …",
           "notify_service": "Ein Benachrichtigungsdienst der Companion-App. Den Namen eines unbekannten Produkts tippst du direkt in die Benachrichtigung. Leer lassen für eine Home-Assistant-Benachrichtigung.",
           "online_lookup": "Fragt Open Food Facts, Open Products Facts und Open Beauty Facts. Treffer landen in der Produktdatenbank, deine eigenen Namen haben immer Vorrang.",
-          "include_brand": "„Ferrero Nutella“ statt „Nutella“. Gilt nur für Namen aus den Online-Datenbanken.",
+          "title_template": "So heißt der Eintrag. Platzhalter: {placeholders}. Text in [ ] entfällt, wenn ein Platzhalter darin leer ist, z. B. „{name}[ ({quantity})]“. Die Marke erscheint nur bei Namen aus den Online-Datenbanken.",
+          "description_template": "Zusatztext zum Eintrag, eine Zeile pro Angabe; Zeilen, deren Platzhalter alle leer sind, entfallen. Gleiche Platzhalter wie beim Titel. Leer = keine Beschreibung. Nicht jede Liste kann eine speichern (die einfache Einkaufsliste nicht).",
           "language": "Zweibuchstabiger Code wie „de“. Leer = Sprache von Home Assistant."
         }
       }
     },
     "error": {
-      "device_not_found": "Dieses Gerät existiert nicht mehr."
+      "device_not_found": "Dieses Gerät existiert nicht mehr.",
+      "unknown_placeholder": "Unbekannter Platzhalter. Verfügbar: {placeholders}."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits als ESPeep-Scanner eingerichtet."
@@ -38,14 +41,20 @@
           "todo_entity": "Einkaufsliste",
           "notify_service": "Handy für Rückfragen zu unbekannten Produkten",
           "online_lookup": "Unbekannte Barcodes online nachschlagen",
-          "include_brand": "Marke vor den Namen setzen",
+          "title_template": "Titel auf der Liste",
+          "description_template": "Beschreibung",
           "language": "Sprache der Produktnamen"
         },
         "data_description": {
           "notify_service": "Leer lassen für eine Home-Assistant-Benachrichtigung.",
+          "title_template": "So heißt der Eintrag. Platzhalter: {placeholders}. Text in [ ] entfällt, wenn ein Platzhalter darin leer ist, z. B. „{name}[ ({quantity})]“. Die Marke erscheint nur bei Namen aus den Online-Datenbanken.",
+          "description_template": "Zusatztext zum Eintrag, eine Zeile pro Angabe; Zeilen, deren Platzhalter alle leer sind, entfallen. Gleiche Platzhalter wie beim Titel. Leer = keine Beschreibung. Nicht jede Liste kann eine speichern (die einfache Einkaufsliste nicht).",
           "language": "Zweibuchstabiger Code wie „de“. Leer = Sprache von Home Assistant."
         }
       }
+    },
+    "error": {
+      "unknown_placeholder": "Unbekannter Platzhalter. Verfügbar: {placeholders}."
     }
   },
   "entity": {
