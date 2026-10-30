@@ -18,6 +18,10 @@ set_product:
       example: "1 l"
       selector:
         text:
+    description:
+      example: "laktosefrei"
+      selector:
+        text:
 
 remove_product:
   fields:

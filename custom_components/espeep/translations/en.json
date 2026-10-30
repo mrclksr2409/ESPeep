@@ -103,6 +103,10 @@
         "quantity": {
           "name": "Quantity",
           "description": "Optional, for your reference."
+        },
+        "description": {
+          "name": "Description",
+          "description": "Optional free text, e.g. \"lactose-free\". Can be used in the list entry."
         }
       }
     },

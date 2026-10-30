@@ -31,8 +31,8 @@ ESPeep has two halves:
   Fettarme Milch 1,5% 1l". Your list says "Milch". Rename it once in the
   ESPeep panel and that is what every future scan puts on the list.
 - **Your fields, your way.** Choose what goes into the title and what into
-  the description of the list entry — name, brand, quantity, barcode,
-  scanner — e.g. "Nutella (450 g)" with "Ferrero" underneath.
+  the description of the list entry — name, brand, quantity, your own
+  description, barcode, scanner — e.g. "Nutella (450 g)" with "Ferrero" underneath.
 - **One name, many barcodes.** Whole milk, low-fat milk, the other brand —
   give them all to "Milch" and each scan lists just "Milch".
 - **Unknown products get learned once.** Not in any database? Your phone asks
@@ -41,7 +41,8 @@ ESPeep has two halves:
   export barcodes in the sidebar panel. No files to edit, no restarts.
 - **Your phone is a scanner too.** *📷 Scannen* in the panel opens the
   camera (or the Home Assistant app's scanner) and lists products just like
-  the device does — handy away from the kitchen.
+  the device does — handy away from the kitchen. A dashboard button to
+  `/espeep?scan` takes you straight to the scanner.
 - **Misreads do not reach your list.** Every barcode is check-digit validated
   on the device.
 - **No duplicates.** Scanning the same product on two shopping trips does not

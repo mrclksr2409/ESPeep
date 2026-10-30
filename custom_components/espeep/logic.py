@@ -64,8 +64,9 @@ def first_brand(brands: str) -> str:
 
 
 # What a list entry can be built from. {brand} and {quantity} are only known
-# for products from the online databases, or when you entered them yourself.
-PLACEHOLDERS = ("name", "brand", "quantity", "ean", "device")
+# for products from the online databases, or when you entered them yourself;
+# {description} only when you entered it.
+PLACEHOLDERS = ("name", "brand", "quantity", "description", "ean", "device")
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 _OPTIONAL = re.compile(r"\[([^\[\]]*)\]")
@@ -124,17 +125,22 @@ def compose_entry(
     name: str,
     brand: str = "",
     quantity: str = "",
+    note: str = "",
     ean: str = "",
     device: str = "",
     own_name: bool = False,
 ) -> tuple[str, str]:
-    """Build title and description of the list entry for a product."""
+    """Build title and description of the list entry for a product.
+
+    `note` is the product's own description, the {description} placeholder.
+    """
     name = clean_name(name)
     brand = clean_name(brand)
     values = {
         "name": name,
         "brand": brand,
         "quantity": clean_name(quantity),
+        "description": clean_name(note),
         "ean": ean,
         "device": clean_name(device),
     }

@@ -31,6 +31,8 @@ class Product(TypedDict):
     name: str
     brand: str
     quantity: str
+    # Free text of your own, e.g. "für Kuchen" or "Bio, laktosefrei".
+    description: str
     # "user" when you named it, "online" when it came from a database.
     source: str
     created: str
@@ -81,6 +83,8 @@ class ProductStore:
             # Databases from before multi-barcode products have no `eans`.
             for alias in product.setdefault("eans", []):
                 self._aliases[alias] = ean
+            # Nor a description.
+            product.setdefault("description", "")
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -138,15 +142,22 @@ class ProductStore:
         *,
         brand: str = "",
         quantity: str = "",
+        description: str = "",
         source: str = SOURCE_USER,
     ) -> Product:
         """Create or replace a product."""
-        product = self._set(ean, name, brand, quantity, source)
+        product = self._set(ean, name, brand, quantity, description, source)
         self._changed()
         return product
 
     def _set(
-        self, ean: str, name: str, brand: str, quantity: str, source: str
+        self,
+        ean: str,
+        name: str,
+        brand: str,
+        quantity: str,
+        description: str,
+        source: str,
     ) -> Product:
         now = dt_util.utcnow().isoformat()
         # A further barcode names the product it belongs to.
@@ -156,6 +167,7 @@ class ProductStore:
             "name": clean_name(name),
             "brand": clean_name(brand),
             "quantity": clean_name(quantity),
+            "description": clean_name(description),
             "source": source,
             "created": existing["created"] if existing else now,
             "updated": now,
@@ -175,6 +187,7 @@ class ProductStore:
         *,
         brand: str = "",
         quantity: str = "",
+        description: str = "",
         eans: list[str] | None = None,
         previous_ean: str | None = None,
     ) -> Product:
@@ -185,7 +198,7 @@ class ProductStore:
             self.products[ean] = self.products.pop(previous_ean)
             for alias in self.products[ean]["eans"]:
                 self._aliases[alias] = ean
-        product = self._set(ean, name, brand, quantity, SOURCE_USER)
+        product = self._set(ean, name, brand, quantity, description, SOURCE_USER)
         if eans is not None:
             key = self.resolve(ean) or ean
             for alias in list(product["eans"]):
@@ -310,7 +323,7 @@ class ProductStore:
             if owner is not None and owner != self.resolve(ean):
                 self._attach(owner, ean)
             else:
-                self._set(ean, name, "", "", SOURCE_USER)
+                self._set(ean, name, "", "", "", SOURCE_USER)
         if entries:
             self._changed()
         return len(entries)

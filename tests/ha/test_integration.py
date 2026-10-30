@@ -22,6 +22,7 @@ from custom_components.espeep.const import (
     SCAN_EVENT,
     SCANNED_EVENT,
 )
+from custom_components.espeep.runtime import get_data
 
 TODO = "todo.einkaufsliste"
 OFF_URL = "https://world.openfoodfacts.org/api/v2/product/{}.json"
@@ -289,6 +290,27 @@ async def test_custom_title_and_description(
     assert env.display[-1]["title"] == "Nutella (450 g)"
 
 
+async def test_product_description(hass: HomeAssistant, esphome_device, env) -> None:
+    hass.states.async_set(TODO, "0", {"supported_features": 64})
+    await _setup(
+        hass,
+        esphome_device,
+        env,
+        **{
+            CONF_ONLINE_LOOKUP: False,
+            "description_template": "{description}\nEAN {ean}",
+        },
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "set_product",
+        {"ean": NUTELLA, "name": "Nutella", "description": "für den Kuchen"},
+        blocking=True,
+    )
+    await _scan(hass, esphome_device, NUTELLA)
+    assert env.added[0]["description"] == f"für den Kuchen\nEAN {NUTELLA}"
+
+
 async def test_no_description(hass: HomeAssistant, esphome_device, env) -> None:
     hass.states.async_set(TODO, "0", {"supported_features": 64})
     await _setup(
@@ -448,11 +470,17 @@ async def test_websocket(
     assert response["error"]["code"] == "invalid_ean"
 
     await client.send_json_auto_id(
-        {"type": "espeep/set", "ean": "5449000000996", "name": "Cola"}
+        {
+            "type": "espeep/set",
+            "ean": "5449000000996",
+            "name": "Cola",
+            "description": "zero",
+        }
     )
     update = await client.receive_json()
     assert update["type"] == "event"
     assert update["event"]["products"]["5449000000996"]["name"] == "Cola"
+    assert update["event"]["products"]["5449000000996"]["description"] == "zero"
     assert (await client.receive_json())["success"]
 
     await client.send_json_auto_id(
@@ -678,3 +706,4 @@ async def test_old_database_is_read(
     )
     await _scan(hass, esphome_device, FETTARM)
     assert env.items == ["Nutella"]
+    assert get_data(hass).store.get(NUTELLA)["description"] == ""
