@@ -211,6 +211,7 @@ class EspeepScanner:
             name=product["name"],
             brand=product["brand"],
             quantity=product["quantity"],
+            note=product.get("description", ""),
             ean=ean,
             device=self.device_name,
             own_name=product["source"] != SOURCE_ONLINE,

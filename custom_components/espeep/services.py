@@ -29,6 +29,7 @@ ATTR_EAN = "ean"
 ATTR_NAME = "name"
 ATTR_BRAND = "brand"
 ATTR_QUANTITY = "quantity"
+ATTR_DESCRIPTION = "description"
 ATTR_PRODUCT = "product"
 
 
@@ -50,6 +51,7 @@ SET_PRODUCT_SCHEMA = vol.Schema(
         vol.Required(ATTR_NAME): _name,
         vol.Optional(ATTR_BRAND, default=""): cv.string,
         vol.Optional(ATTR_QUANTITY, default=""): cv.string,
+        vol.Optional(ATTR_DESCRIPTION, default=""): cv.string,
     }
 )
 REMOVE_PRODUCT_SCHEMA = vol.Schema({vol.Required(ATTR_EAN): _ean})
@@ -86,6 +88,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             call.data[ATTR_NAME],
             brand=call.data[ATTR_BRAND],
             quantity=call.data[ATTR_QUANTITY],
+            description=call.data[ATTR_DESCRIPTION],
         )
         async_named(hass, call.data[ATTR_EAN])
 

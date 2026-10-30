@@ -91,7 +91,10 @@ class EspeepPanel extends HTMLElement {
   }
 
   set panel(_panel) {}
-  set route(_route) {}
+  // HA sets the route on every visit, also when it reuses this element.
+  set route(_route) {
+    this._checkScanRequest();
+  }
 
   disconnectedCallback() {
     this._closeScan();
@@ -103,13 +106,16 @@ class EspeepPanel extends HTMLElement {
 
   connectedCallback() {
     if (this._hass && !this._unsub) this._subscribe();
+    this._checkScanRequest();
   }
 
   _subscribe() {
     this._unsub = this._hass.connection.subscribeMessage(
       (data) => {
         this._data = data;
+        this._loaded = true;
         this._render();
+        this._checkScanRequest();
       },
       { type: "espeep/subscribe" },
     );
@@ -133,6 +139,22 @@ class EspeepPanel extends HTMLElement {
   _byName(name) {
     const wanted = name.trim().toLowerCase();
     return Object.keys(this._data.products).find((key) => this._data.products[key].name.toLowerCase() === wanted) || null;
+  }
+
+  // /espeep?scan, e.g. from a dashboard button, opens the scanner right away;
+  // /espeep?scan=<config entry id> also picks the scanner.
+  _checkScanRequest() {
+    if (!this._loaded || !this.isConnected) return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("scan")) return;
+    const wanted = params.get("scan");
+    // Once only: not again on reloads or when coming back to the panel.
+    params.delete("scan");
+    const query = params.toString();
+    history.replaceState(history.state, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+    if (!this._data.scanners.length) return this._flash("Kein ESPeep-Scanner eingerichtet – Scannen nicht möglich.", true);
+    if (wanted && this._data.scanners.some((s) => s.entry_id === wanted)) this._scanEntry = wanted;
+    this._openScan();
   }
 
   _startForm(ean) {
@@ -268,6 +290,9 @@ class EspeepPanel extends HTMLElement {
         <label>Menge (optional)
           <input id="f-quantity" value="${esc(product ? product.quantity : "")}" />
         </label>
+        <label class="full">Beschreibung (optional)
+          <input id="f-description" value="${esc(product ? product.description || "" : "")}" placeholder="z. B. laktosefrei, für den Kuchen" />
+        </label>
       </div>
       <div class="aliases">
         <label>Weitere Barcodes – Varianten, die unter demselben Namen auf die Liste kommen
@@ -304,7 +329,8 @@ class EspeepPanel extends HTMLElement {
           ean.includes(filter) ||
           (p.eans || []).some((code) => code.includes(filter)) ||
           p.name.toLowerCase().includes(filter) ||
-          (p.brand || "").toLowerCase().includes(filter),
+          (p.brand || "").toLowerCase().includes(filter) ||
+          (p.description || "").toLowerCase().includes(filter),
       )
       .sort((a, b) => a[1].name.localeCompare(b[1].name));
     const total = Object.keys(this._data.products).length;
@@ -312,7 +338,7 @@ class EspeepPanel extends HTMLElement {
 
     return `<div class="card">
       <h2>Produkte <span class="badge">${total}</span></h2>
-      <input id="filter" class="filter" placeholder="Suchen nach Name, Marke oder Barcode" value="${esc(this._filter)}" />
+      <input id="filter" class="filter" placeholder="Suchen nach Name, Marke, Beschreibung oder Barcode" value="${esc(this._filter)}" />
       ${
         entries.length
           ? `<table>
@@ -321,7 +347,7 @@ class EspeepPanel extends HTMLElement {
         ${entries
           .map(
             ([ean, p]) => `<tr data-ean="${esc(ean)}">
-            <td><b>${esc(p.name)}</b></td>
+            <td><b>${esc(p.name)}</b>${p.description ? `<small class="note">${esc(p.description)}</small>` : ""}</td>
             <td class="mono">${esc(ean)}${
               p.eans && p.eans.length
                 ? `<small title="${esc(p.eans.join(", "))}"> +${p.eans.length} weitere</small>`
@@ -407,7 +433,7 @@ class EspeepPanel extends HTMLElement {
         }
       }),
     );
-    ["f-ean", "f-name", "f-brand", "f-quantity"].forEach((id) =>
+    ["f-ean", "f-name", "f-brand", "f-quantity", "f-description"].forEach((id) =>
       root.getElementById(id).addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") this._onAction(ev, "save");
       }),
@@ -466,6 +492,7 @@ class EspeepPanel extends HTMLElement {
             name: target.name,
             brand: target.brand || "",
             quantity: target.quantity || "",
+            description: target.description || "",
             eans: [...new Set(eans)].filter((e) => e !== twin),
           };
         } else {
@@ -479,13 +506,14 @@ class EspeepPanel extends HTMLElement {
             name: value("f-name"),
             brand: value("f-brand"),
             quantity: value("f-quantity"),
+            description: value("f-description"),
             eans: this._formEans.filter((e) => e !== code),
           };
           if (this._editing) message.previous_ean = this._editing;
         }
         await this._ws(message);
         this._startForm(null);
-        ["f-ean", "f-name", "f-brand", "f-quantity", "f-alias"].forEach((id) => (root.getElementById(id).value = ""));
+        ["f-ean", "f-name", "f-brand", "f-quantity", "f-description", "f-alias"].forEach((id) => (root.getElementById(id).value = ""));
         this._flash(`„${message.name}“ gespeichert.`);
         break;
       }
@@ -565,10 +593,10 @@ class EspeepPanel extends HTMLElement {
         // One line per barcode; the import joins lines with the same name again.
         const lines = Object.entries(this._data.products).flatMap(([code, p]) =>
           [code, ...(p.eans || [])].map((e) =>
-            [e, p.name, p.brand, p.quantity].map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(";"),
+            [e, p.name, p.brand, p.quantity, p.description].map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(";"),
           ),
         );
-        this._download("espeep-produkte.csv", ["ean;name;brand;quantity", ...lines].join("\n"), "text/csv");
+        this._download("espeep-produkte.csv", ["ean;name;brand;quantity;description", ...lines].join("\n"), "text/csv");
         break;
       }
       case "export-json":
@@ -1057,6 +1085,8 @@ const STYLE = `
   .mono { font-family: var(--code-font-family, monospace); }
   small { display: block; color: var(--secondary-text-color); font-size: 12px; }
   td small { display: inline; }
+  td small.note { display: block; }
+  .form .full { grid-column: 1 / -1; }
   .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--secondary-background-color); white-space: nowrap; }
   .tag.user, .tag.r-added { background: rgba(76,175,80,.2); }
   .tag.online { background: rgba(33,150,243,.2); }

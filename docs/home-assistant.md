@@ -63,6 +63,7 @@ field of the to-do item. Both are templates with these placeholders:
 | `{name}` | The product name — yours, or the one from the online database |
 | `{brand}` | The brand, e.g. "Ferrero" |
 | `{quantity}` | The package size, e.g. "450 g" |
+| `{description}` | Your own description of the product, e.g. "laktosefrei" |
 | `{ean}` | The barcode that was scanned |
 | `{device}` | The scanner it was scanned with |
 
@@ -110,7 +111,8 @@ The sidebar entry **ESPeep** is where you manage everything:
   what the databases know, and you shorten the name to what you actually want
   on the list. *Weitere Barcodes* adds variants to the product.
 - **Produkte** — the whole database: search, edit, delete, or put a product on
-  the list with 🛒 without scanning it.
+  the list with 🛒 without scanning it. Besides brand and quantity, every
+  product can carry a *Beschreibung* of your own, usable as `{description}`.
 - **Letzte Scans** — what happened on the last scans, and on which scanner.
 - **Import / Export** — paste lines like `4008400202037;Milch`, or the contents
   of the old `ean_mapping.yaml`; export as CSV or JSON. Lines with the same
@@ -140,6 +142,23 @@ use the app or HTTPS access (for example Home Assistant Cloud).
 
 The button appears once an ESPeep device is set up: a phone scan uses that
 device's list and settings.
+
+#### Straight to the scanner from a dashboard
+
+Opening the panel as `/espeep?scan` starts the scanner right away. Put a
+button on your dashboard and one tap gets you scanning:
+
+```yaml
+type: button
+name: Scannen
+icon: mdi:barcode-scan
+tap_action:
+  action: navigate
+  navigation_path: /espeep?scan
+```
+
+With several ESPeeps, `/espeep?scan=<config entry id>` also picks the one
+whose list and display to use (the id is in the URL of the integration entry).
 
 ### One product, several barcodes
 

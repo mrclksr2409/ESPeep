@@ -85,6 +85,7 @@ def ws_subscribe(
         vol.Required("name"): str,
         vol.Optional("brand", default=""): str,
         vol.Optional("quantity", default=""): str,
+        vol.Optional("description", default=""): str,
         # Renaming changes the key; the old one goes away.
         vol.Optional("previous_ean"): str,
         # Further barcodes of the product. Omitted leaves them as they are.
@@ -116,6 +117,7 @@ def ws_set(
         name,
         brand=msg["brand"],
         quantity=msg["quantity"],
+        description=msg["description"],
         eans=eans,
         previous_ean=msg.get("previous_ean"),
     )

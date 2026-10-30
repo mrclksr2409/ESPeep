@@ -103,6 +103,10 @@
         "quantity": {
           "name": "Menge",
           "description": "Optional, nur zur Information."
+        },
+        "description": {
+          "name": "Beschreibung",
+          "description": "Optionaler Freitext, z. B. „laktosefrei“. Kann im Listeneintrag verwendet werden."
         }
       }
     },

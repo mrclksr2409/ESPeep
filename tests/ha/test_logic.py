@@ -70,6 +70,15 @@ def test_compose_entry_description():
     assert description == "Marke: Ferrero\nEAN 3017620422003\nGescannt: Küche"
 
 
+def test_compose_entry_product_description():
+    template = "{description}\nEAN {ean}"
+    assert (
+        compose_entry("{name}", template, name="Milch", note="laktosefrei", ean="1")[1]
+        == "laktosefrei\nEAN 1"
+    )
+    assert compose_entry("{name}", template, name="Milch", ean="1")[1] == "EAN 1"
+
+
 def test_compose_entry_falls_back_to_name():
     assert compose_entry("{brand}", "", name="Milch") == ("Milch", "")
 
