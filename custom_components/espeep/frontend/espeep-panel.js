@@ -479,38 +479,19 @@ class EspeepPanel extends HTMLElement {
         if (!value("f-name")) return this._flash("Bitte einen Namen eingeben.", true);
         const owner = this._owner(code);
         const current = this._editing ? this._owner(this._editing) : null;
-        // Same name as another product: offer to make these its barcodes.
-        const twin = this._byName(value("f-name"));
-        let message;
-        if (twin !== null && twin !== current && twin !== owner) {
-          const target = this._data.products[twin];
-          if (!confirm(`„${target.name}“ gibt es schon. ${code} dort als weiteren Barcode zuordnen?`)) return;
-          const eans = [...(target.eans || []), ...(this._editing ? [this._editing] : []), code, ...this._formEans];
-          message = {
-            type: "espeep/set",
-            ean: twin,
-            name: target.name,
-            brand: target.brand || "",
-            quantity: target.quantity || "",
-            description: target.description || "",
-            eans: [...new Set(eans)].filter((e) => e !== twin),
-          };
-        } else {
-          if (owner !== null && owner !== current) {
-            if (!confirm(`${code} ist schon als „${this._data.products[owner].name}“ gespeichert. Überschreiben?`))
-              return;
-          }
-          message = {
-            type: "espeep/set",
-            ean: code,
-            name: value("f-name"),
-            brand: value("f-brand"),
-            quantity: value("f-quantity"),
-            description: value("f-description"),
-            eans: this._formEans.filter((e) => e !== code),
-          };
-          if (this._editing) message.previous_ean = this._editing;
-        }
+        // A barcode belongs to one product only; names may repeat.
+        if (owner !== null && owner !== current)
+          return this._flash(`${code} ist schon als „${this._data.products[owner].name}“ gespeichert.`, true);
+        const message = {
+          type: "espeep/set",
+          ean: code,
+          name: value("f-name"),
+          brand: value("f-brand"),
+          quantity: value("f-quantity"),
+          description: value("f-description"),
+          eans: this._formEans.filter((e) => e !== code),
+        };
+        if (this._editing) message.previous_ean = this._editing;
         await this._ws(message);
         this._startForm(null);
         ["f-ean", "f-name", "f-brand", "f-quantity", "f-description", "f-alias"].forEach((id) => (root.getElementById(id).value = ""));
